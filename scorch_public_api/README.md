@@ -108,7 +108,32 @@ curl "http://127.0.0.1:8000/demo/360-mall?event_day=true&occupancy_level=high"
 | `POST /cooling/estimate` | Hourly total/baseline/cooling MW, peak MW & hour, risk category, SCORCH scenario |
 | `POST /actions/recommend` | Pre-cooling window, peak protection, reductions, readiness checks, what NOT to do |
 | `GET /demo/360-mall` | Full pipeline for 360 Mall + plain-English executive summary |
-| `GET /dashboard` | Interactive dashboard (vanilla HTML/JS, no CDN, works offline) |
+| `GET /map/assets` | Built-in example assets as a GeoJSON FeatureCollection |
+| `GET /map/assets/{slug}` | One example asset as GeoJSON (404 if unknown) |
+| `GET /map/risk-layer` | Risk-scored GeoJSON layer (marker colors, peak windows, summaries) |
+| `GET /map/buildings/nearby?lat=&lon=&radius_m=` | OSM footprints via Overpass, with offline fallback geometry |
+| `GET /dashboard` | Interactive dashboard with Kuwait asset map (simulator works offline) |
+
+## Map Layer Strategy
+
+The dashboard includes a Kuwait asset map built strictly on free/open geodata:
+
+- **Prototype: Leaflet + OpenStreetMap raster tiles.** Leaflet (BSD-2) is loaded from a
+  public CDN; `tile.openstreetmap.org` is used for the basemap with proper attribution.
+  **Public OSM tiles are for prototype/light usage only** — the OSMF tile usage policy does
+  not allow heavy production traffic.
+- **Building footprints: OSM Overpass API, optional.** `/map/buildings/nearby` queries
+  Overpass for real footprints; if Overpass is slow, down, or empty, the endpoint returns
+  fallback geometry (asset point + approximate square buffer sized from the public area
+  assumption) tagged `source: fallback_public_assumption` — the map never breaks offline.
+- **Open-data direction:** OSM, [Overture Maps](https://overturemaps.org/), and Microsoft's
+  open Building Footprints datasets are the correct long-term sources for building geometry.
+- **Google Maps/Google Earth are NOT SCORCH data sources.** They are not free/open
+  extraction sources (licensing prohibits it). Google may only be used as a manual visual
+  reference by a human, never as an API or scraped data source.
+- **Production path:** self-host raster/vector tiles (e.g. OpenMapTiles/Protomaps
+  **PMTiles**) or use a usage-compliant tile provider, and pre-bake footprint extracts
+  from OSM/Overture instead of live Overpass calls.
 
 ## Limitations (read this)
 
@@ -146,11 +171,14 @@ scorch_public_api/
 │   ├── data_sources.py     # Open-Meteo + synthetic Kuwait hot-day fallback
 │   ├── risk_model.py       # risk score, demand model, SCORCH scenario
 │   ├── recommendations.py  # rule-based action plans
-│   └── assets.py           # archetypes + 360 Mall public profile
+│   ├── assets.py           # archetypes + example Kuwait assets (360 Mall etc.)
+│   ├── geo_sources.py      # OSM Overpass footprints + offline fallback geometry
+│   └── map_layers.py       # GeoJSON builders + per-asset risk layer
 ├── dashboard/
-│   └── index.html          # self-contained dashboard (served at /dashboard)
+│   └── index.html          # dashboard + Leaflet/OSM map (served at /dashboard)
 ├── tests/
-│   └── test_risk_model.py
+│   ├── test_risk_model.py
+│   └── test_map_layers.py
 └── examples/
     └── sample_360_mall_request.json
 ```

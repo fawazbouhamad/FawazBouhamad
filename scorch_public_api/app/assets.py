@@ -90,3 +90,46 @@ MALL_360 = {
         "No BMS, meter, or floor-plan data was used."
     ),
 }
+
+# Built-in example assets for the map layer, keyed by slug.
+# Coordinates are approximate public values; areas are public assumptions.
+# None of these entries use private, paid, or scraped data.
+EXAMPLE_ASSETS: dict[str, dict] = {
+    "360-mall": MALL_360,
+    "avenues-mall": {
+        "name": "The Avenues Mall (example asset, public assumptions)",
+        "latitude": 29.3033,
+        "longitude": 47.9391,
+        "building_type": "mall",
+        "area_m2": 360_000.0,  # approximate GLA from public sources
+        "operating_hours": {"start_hour": 10, "end_hour": 22},
+        "notes": "Approximate public coordinates and GLA; archetype zone mix assumed.",
+    },
+    "jaber-hospital": {
+        "name": "Jaber Al-Ahmad Hospital (example asset, public assumptions)",
+        "latitude": 29.3070,
+        "longitude": 47.9260,
+        "building_type": "hospital",
+        "area_m2": 250_000.0,  # approximate built-up area, public assumption
+        "operating_hours": {"start_hour": 0, "end_hour": 24},
+        "notes": "24h critical-comfort facility; approximate public coordinates.",
+    },
+    "grand-mosque": {
+        "name": "Grand Mosque of Kuwait (example asset, public assumptions)",
+        "latitude": 29.3805,
+        "longitude": 47.9672,
+        "building_type": "mosque",
+        "area_m2": 45_000.0,  # approximate site area, public assumption
+        "operating_hours": {"start_hour": 4, "end_hour": 21},
+        "notes": "Intermittent prayer-time occupancy; approximate public coordinates.",
+    },
+    "salmiya-school": {
+        "name": "Example public school, Salmiya (generic archetype)",
+        "latitude": 29.3339,
+        "longitude": 48.0762,
+        "building_type": "school",
+        "area_m2": 12_000.0,
+        "operating_hours": {"start_hour": 7, "end_hour": 15},
+        "notes": "Fully generic school archetype at an approximate Salmiya location.",
+    },
+}

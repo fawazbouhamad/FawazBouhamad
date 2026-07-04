@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SCORCH — Public Climate Risk Dashboard</title>
+<!-- Leaflet (BSD-2, free) from unpkg with SRI. Loaded best-effort: if it is
+     unreachable (fully offline), the map section shows a notice and the rest
+     of the dashboard keeps working. OSM tiles need internet anyway. -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <style>
   :root {
     --bg: #12100e; --panel: #1d1a17; --line: #35302a;
@@ -44,6 +51,16 @@
   .legend { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
   .legend span { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 4px 0 12px; }
   #status { font-size: 12px; color: var(--muted); margin-top: 10px; min-height: 16px; }
+  .map-section { margin: 20px 28px 0; }
+  #map { height: 420px; border-radius: 8px; background: #0c0b0a; }
+  #map .offline-note { color: var(--muted); padding: 24px; font-size: 14px; }
+  .leaflet-popup-content { color: #222; font-size: 13px; line-height: 1.45; }
+  .leaflet-popup-content b { font-size: 14px; }
+  .leaflet-popup-content .pill { display: inline-block; padding: 1px 8px; border-radius: 10px;
+                                 color: #fff; font-size: 11px; font-weight: 700; }
+  .leaflet-popup-content button { width: auto; margin: 8px 6px 0 0; padding: 5px 10px;
+                                  font-size: 12px; background: #ef6c00; color: #fff; border-radius: 5px; }
+  #mapStatus { font-size: 12px; color: var(--muted); margin-top: 8px; min-height: 14px; }
 </style>
 </head>
 <body>
@@ -52,6 +69,19 @@
   <p>Heat-driven cooling risk screening for Kuwait/GCC buildings, from free public data only.
      This is a public-data estimate, not a verified meter/BMS result.</p>
 </header>
+
+<section class="panel map-section">
+  <h3>Kuwait asset map — Leaflet + OpenStreetMap tiles (prototype/light usage only)</h3>
+  <div id="map"></div>
+  <div class="legend" style="margin-top:8px">Risk colors:
+    <span style="background:#2e7d32"></span>Low
+    <span style="background:#f9a825"></span>Moderate
+    <span style="background:#ef6c00"></span>High
+    <span style="background:#c62828"></span>Very High
+    <span style="background:#8d8d8d"></span>not yet simulated
+  </div>
+  <div id="mapStatus">Toggle layers (top-right): example assets, risk layer, nearby building footprints.</div>
+</section>
 
 <main>
   <div class="panel">
@@ -223,6 +253,125 @@ function render(risk, cooling, plan) {
 }
 
 document.getElementById('run').addEventListener('click', run);
+
+// ---- Kuwait asset map (Leaflet + OSM tiles, free/open only) ------------
+// Public OSM tiles are for prototype/light usage; production should use
+// self-hosted tiles, PMTiles, or a usage-compliant provider.
+let map = null, assetsLayer = null, riskLayer = null, footprintLayer = null;
+let riskLoaded = false, selectedAsset = '360-mall';
+const assetIndex = {};  // slug -> {lat, lon, name}
+const mapStatus = msg => { document.getElementById('mapStatus').textContent = msg; };
+
+function popupHtml(p) {
+  const color = p.marker_color || '#8d8d8d';
+  const risk = p.risk_category
+    ? '<span class="pill" style="background:' + color + '">' + p.risk_category +
+      ' (' + p.risk_score + '/100)</span>'
+    : '<span class="pill" style="background:#8d8d8d">not yet simulated</span>';
+  let html = '<b>' + p.name + '</b><br>' +
+    'Type: ' + p.building_type + ' · Area: ' + Number(p.area_m2).toLocaleString() + ' m²<br>' +
+    'Heat risk: ' + risk + '<br>';
+  if (p.peak_window) html += 'Peak cooling window: ' +
+    String(p.peak_window.start_hour).padStart(2, '0') + ':00–' +
+    String(p.peak_window.end_hour).padStart(2, '0') + ':00<br>';
+  if (p.peak_reduction_mw != null) html += 'Est. SCORCH peak reduction: −' +
+    p.peak_reduction_mw.toFixed(1) + ' MW (' + p.peak_reduction_pct + '%)<br>';
+  html += '<button onclick="useInSimulator(\'' + p.slug + '\')">Run simulation</button>' +
+    '<button onclick="loadFootprints(\'' + p.slug + '\')">Nearby footprints</button>' +
+    '<div style="margin-top:6px;font-size:11px;color:#666">' + p.disclaimer + '</div>';
+  return html;
+}
+
+function addAssetMarkers(layer, features) {
+  for (const f of features) {
+    const p = f.properties, [lon, lat] = f.geometry.coordinates;
+    assetIndex[p.slug] = { lat, lon, name: p.name };
+    L.circleMarker([lat, lon], {
+      radius: 9, color: '#12100e', weight: 1.5, fillOpacity: 0.9,
+      fillColor: p.marker_color || '#8d8d8d',
+    }).bindPopup(popupHtml(p), { maxWidth: 320 }).addTo(layer);
+  }
+}
+
+async function loadRiskLayer() {
+  mapStatus('Running SCORCH risk simulation for all example assets…');
+  try {
+    const fc = await (await fetch('/map/risk-layer')).json();
+    riskLayer.clearLayers();
+    addAssetMarkers(riskLayer, fc.features);
+    riskLoaded = true;
+    mapStatus('Risk layer loaded — public-data estimates, not verified results.');
+  } catch (e) { mapStatus('Risk layer failed: ' + e.message); }
+}
+
+async function loadFootprints(slug) {
+  selectedAsset = slug || selectedAsset;
+  const a = assetIndex[selectedAsset];
+  if (!a || !map) return;
+  if (!map.hasLayer(footprintLayer)) footprintLayer.addTo(map);
+  mapStatus('Fetching building footprints near ' + a.name + ' (OSM Overpass, optional)…');
+  try {
+    const fc = await (await fetch('/map/buildings/nearby?lat=' + a.lat + '&lon=' + a.lon + '&radius_m=500')).json();
+    footprintLayer.clearLayers();
+    const fallback = fc.properties.source === 'fallback_public_assumption';
+    L.geoJSON(fc, {
+      style: () => fallback
+        ? { color: '#ffb257', weight: 2, dashArray: '6 4', fillOpacity: 0.08 }
+        : { color: '#5aa9e6', weight: 1.5, fillOpacity: 0.15 },
+      pointToLayer: (f, latlng) => L.circleMarker(latlng, { radius: 5, fillColor: '#ffb257', fillOpacity: 1, weight: 0 }),
+      onEachFeature: (f, l) => l.bindPopup(
+        '<b>' + (f.properties.name || 'Building') + '</b><br>Source: ' + f.properties.source +
+        (f.properties.disclaimer ? '<br><span style="font-size:11px;color:#666">' + f.properties.disclaimer + '</span>' : '')),
+    }).addTo(footprintLayer);
+    map.setView([a.lat, a.lon], 15);
+    mapStatus(fallback
+      ? 'Overpass unavailable — showing fallback public-assumption buffer (not a real footprint).'
+      : 'OSM footprints loaded. © OpenStreetMap contributors (ODbL).');
+  } catch (e) { mapStatus('Footprint fetch failed: ' + e.message); }
+}
+
+async function useInSimulator(slug) {
+  try {
+    const f = await (await fetch('/map/assets/' + slug)).json();
+    const p = f.properties;
+    document.getElementById('btype').value = p.building_type;
+    document.getElementById('area').value = p.area_m2;
+    document.getElementById('open').value = p.operating_hours.start_hour;
+    document.getElementById('close').value = Math.min(p.operating_hours.end_hour, 24);
+    document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
+    await run();
+  } catch (e) { mapStatus('Could not load asset: ' + e.message); }
+}
+
+function initMap() {
+  const el = document.getElementById('map');
+  if (typeof L === 'undefined') {
+    el.innerHTML = '<div class="offline-note">Map unavailable: Leaflet/OSM tiles need internet access. ' +
+      'The simulator below works fully offline.</div>';
+    return;
+  }
+  map = L.map('map').setView([29.32, 47.97], 11);  // Kuwait
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  }).addTo(map);
+  assetsLayer = L.layerGroup().addTo(map);
+  riskLayer = L.layerGroup();
+  footprintLayer = L.layerGroup();
+  L.control.layers(null, {
+    'Example assets': assetsLayer,
+    'Risk layer': riskLayer,
+    'Nearby building footprints': footprintLayer,
+  }, { collapsed: false }).addTo(map);
+  map.on('overlayadd', e => {
+    if (e.layer === riskLayer && !riskLoaded) loadRiskLayer();
+    if (e.layer === footprintLayer && footprintLayer.getLayers().length === 0) loadFootprints(selectedAsset);
+  });
+  fetch('/map/assets').then(r => r.json())
+    .then(fc => addAssetMarkers(assetsLayer, fc.features))
+    .catch(e => mapStatus('Could not load assets: ' + e.message));
+}
+initMap();
 </script>
 </body>
 </html>

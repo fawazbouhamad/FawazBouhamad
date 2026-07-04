@@ -13,9 +13,10 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 
-from . import risk_model
-from .assets import MALL_360
+from . import map_layers, risk_model
+from .assets import EXAMPLE_ASSETS, MALL_360
 from .data_sources import get_weather
+from .geo_sources import nearby_buildings
 from .models import (
     ActionPlan,
     ActionRequest,
@@ -26,7 +27,7 @@ from .models import (
 )
 from .recommendations import build_action_plan
 
-API_VERSION = "0.1.0"
+API_VERSION = "0.2.0"
 DASHBOARD_FILE = Path(__file__).resolve().parent.parent / "dashboard" / "index.html"
 
 app = FastAPI(
@@ -66,7 +67,11 @@ def root() -> dict:
             "POST /cooling/estimate": "hourly demand + SCORCH scenario estimate",
             "POST /actions/recommend": "operational action plan for a risk score",
             "GET /demo/360-mall": "full demo run for 360 Mall",
-            "GET /dashboard": "interactive dashboard",
+            "GET /map/assets": "built-in example assets as GeoJSON",
+            "GET /map/assets/{asset_slug}": "one example asset as GeoJSON",
+            "GET /map/risk-layer": "risk-scored GeoJSON layer for all example assets",
+            "GET /map/buildings/nearby": "OSM footprints near a point (fallback geometry if offline)",
+            "GET /dashboard": "interactive dashboard with map",
             "GET /docs": "OpenAPI docs",
         },
     }
@@ -193,6 +198,51 @@ def demo_360_mall(event_day: bool = False, occupancy_level: str = "medium") -> d
         "assumptions": risk_model.model_assumptions(req, weather),
         "executive_summary": summary,
     }
+
+
+@app.get("/map/assets")
+def map_assets() -> dict:
+    """All built-in example assets as a GeoJSON FeatureCollection."""
+    return map_layers.assets_feature_collection()
+
+
+@app.get("/map/assets/{asset_slug}")
+def map_asset(asset_slug: str) -> dict:
+    """One built-in example asset as a GeoJSON Feature (404 if unknown)."""
+    asset = map_layers.get_asset_or_404(asset_slug)
+    return map_layers.asset_feature(asset_slug, asset)
+
+
+@app.get("/map/risk-layer")
+def map_risk_layer() -> dict:
+    """Lightweight SCORCH risk simulation for every built-in asset, as GeoJSON."""
+    return map_layers.risk_feature_collection()
+
+
+@app.get("/map/buildings/nearby")
+def map_buildings_nearby(lat: float, lon: float, radius_m: int = 500) -> dict:
+    """OSM building footprints near a point via Overpass (optional, free).
+
+    Falls back to public-assumption geometry (asset point + approximate
+    square buffer) whenever Overpass is unreachable or empty, so the map
+    keeps working offline. radius_m is clamped to 100-1500 m to stay a
+    polite Overpass citizen.
+    """
+    radius_m = max(100, min(radius_m, 1500))
+    # Use the nearest example asset (if reasonably close) to label/size the
+    # fallback geometry; otherwise use a generic buffer.
+    nearest_slug, nearest_asset, best = None, None, float("inf")
+    for slug, asset in EXAMPLE_ASSETS.items():
+        d2 = (asset["latitude"] - lat) ** 2 + (asset["longitude"] - lon) ** 2
+        if d2 < best:
+            nearest_slug, nearest_asset, best = slug, asset, d2
+    if nearest_asset is not None and best < (0.03**2):  # within ~3 km
+        name, area = nearest_asset["name"], nearest_asset["area_m2"]
+    else:
+        nearest_slug, name, area = None, "Unnamed location (generic buffer)", 20_000.0
+    result = nearby_buildings(lat, lon, radius_m, area, name)
+    result["properties"]["nearest_example_asset"] = nearest_slug
+    return result
 
 
 @app.get("/dashboard")
