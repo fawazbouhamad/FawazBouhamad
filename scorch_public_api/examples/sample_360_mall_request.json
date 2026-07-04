@@ -1,0 +1,18 @@
+{
+  "latitude": 29.2733,
+  "longitude": 47.977,
+  "building_type": "mall",
+  "area_m2": 130000,
+  "operating_hours": { "start_hour": 10, "end_hour": 22 },
+  "event_day": true,
+  "occupancy_level": "high",
+  "zones": [
+    { "name": "Retail concourse", "area_share": 0.45, "internal_load_factor": 1.0, "critical_comfort": true },
+    { "name": "Food court / restaurants", "area_share": 0.12, "internal_load_factor": 1.8, "critical_comfort": true },
+    { "name": "Cinema", "area_share": 0.08, "internal_load_factor": 1.5, "critical_comfort": true },
+    { "name": "Arena / event space", "area_share": 0.08, "internal_load_factor": 1.6, "critical_comfort": true },
+    { "name": "Hotel connection", "area_share": 0.07, "internal_load_factor": 1.2, "critical_comfort": true },
+    { "name": "Parking / service areas", "area_share": 0.12, "internal_load_factor": 0.4, "critical_comfort": false },
+    { "name": "Back-of-house", "area_share": 0.08, "internal_load_factor": 0.6, "critical_comfort": false }
+  ]
+}

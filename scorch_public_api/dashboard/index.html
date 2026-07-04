@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SCORCH — Public Climate Risk Dashboard</title>
+<style>
+  :root {
+    --bg: #12100e; --panel: #1d1a17; --line: #35302a;
+    --text: #f2ede6; --muted: #a89e91;
+    --hot: #ff7a45; --cool: #5aa9e6; --good: #7bc47f; --accent: #ffb257;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+         background: var(--bg); color: var(--text); }
+  header { padding: 20px 28px; border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0; font-size: 22px; letter-spacing: 1px; }
+  header p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+  main { display: grid; grid-template-columns: 300px 1fr; gap: 20px; padding: 20px 28px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4px; }
+  input, select { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid var(--line);
+                  background: var(--bg); color: var(--text); font-size: 14px; }
+  .row { display: flex; gap: 8px; }
+  .row > div { flex: 1; }
+  button { margin-top: 16px; width: 100%; padding: 12px; border: 0; border-radius: 8px;
+           background: var(--hot); color: #1a0d05; font-weight: 700; font-size: 15px; cursor: pointer; }
+  button:hover { filter: brightness(1.1); }
+  button:disabled { opacity: 0.5; cursor: wait; }
+  .results { display: grid; gap: 20px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .tile .k { font-size: 12px; color: var(--muted); }
+  .tile .v { font-size: 26px; font-weight: 700; margin-top: 4px; }
+  .tile .s { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .cat-Low { color: var(--good); } .cat-Moderate { color: var(--accent); }
+  .cat-High { color: var(--hot); } .cat-VeryHigh { color: #ff4d4d; }
+  h3 { margin: 0 0 10px; font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  canvas { width: 100%; height: 240px; display: block; }
+  ul { margin: 6px 0; padding-left: 20px; font-size: 13.5px; line-height: 1.55; }
+  .disclaimer { font-size: 12px; color: var(--muted); border-left: 3px solid var(--accent);
+                padding: 8px 12px; background: rgba(255,178,87,0.06); border-radius: 4px; }
+  .legend { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .legend span { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 4px 0 12px; }
+  #status { font-size: 12px; color: var(--muted); margin-top: 10px; min-height: 16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🔥 SCORCH — Public Climate Risk Dashboard</h1>
+  <p>Heat-driven cooling risk screening for Kuwait/GCC buildings, from free public data only.
+     This is a public-data estimate, not a verified meter/BMS result.</p>
+</header>
+
+<main>
+  <div class="panel">
+    <h3>Asset &amp; scenario</h3>
+    <label>Example asset</label>
+    <select id="asset"><option value="360-mall">360 Mall, Kuwait (public assumptions)</option></select>
+    <label>Building type</label>
+    <select id="btype">
+      <option value="mall" selected>Mall (mixed-use)</option>
+      <option value="tower">Tower</option>
+      <option value="school">School</option>
+      <option value="hospital">Hospital</option>
+      <option value="mosque">Mosque</option>
+      <option value="factory">Factory</option>
+      <option value="generic">Generic</option>
+    </select>
+    <label>Area (m²)</label>
+    <input id="area" type="number" value="130000" min="500" step="1000">
+    <div class="row">
+      <div><label>Opens (hour)</label><input id="open" type="number" value="10" min="0" max="23"></div>
+      <div><label>Closes (hour)</label><input id="close" type="number" value="22" min="1" max="24"></div>
+    </div>
+    <label>Event day?</label>
+    <select id="event"><option value="false">No</option><option value="true">Yes — major event</option></select>
+    <label>Occupancy level</label>
+    <select id="occ"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>
+    <button id="run">Run SCORCH simulation</button>
+    <div id="status"></div>
+  </div>
+
+  <div class="results" id="results" style="display:none">
+    <div class="tiles">
+      <div class="tile"><div class="k">Heat risk score</div><div class="v" id="score">–</div><div class="s" id="category">–</div></div>
+      <div class="tile"><div class="k">Peak cooling window</div><div class="v" id="window">–</div><div class="s">protect this window</div></div>
+      <div class="tile"><div class="k">Estimated peak demand</div><div class="v" id="peak">–</div><div class="s" id="peakhour">–</div></div>
+      <div class="tile"><div class="k">SCORCH peak reduction</div><div class="v" id="reduction">–</div><div class="s" id="energydelta">–</div></div>
+    </div>
+
+    <div class="panel"><h3>Outdoor temperature — next 48h (<span id="wsource">–</span>)</h3><canvas id="tempChart"></canvas></div>
+    <div class="panel"><h3>Estimated hourly demand (MW)</h3>
+      <div class="legend"><span style="background:var(--hot)"></span>total <span style="background:var(--cool)"></span>cooling <span style="background:var(--muted)"></span>non-cooling base</div>
+      <canvas id="demandChart"></canvas></div>
+    <div class="panel"><h3>Baseline vs SCORCH-recommended demand (MW)</h3>
+      <div class="legend"><span style="background:var(--hot)"></span>baseline / reactive <span style="background:var(--good)"></span>SCORCH recommended</div>
+      <canvas id="scorchChart"></canvas></div>
+
+    <div class="panel"><h3>Recommended action brief</h3><div id="actions"></div></div>
+    <div class="panel"><h3>Assumptions &amp; confidence</h3>
+      <p class="disclaimer" id="disclaimer"></p>
+      <p style="font-size:13px"><b>Confidence:</b> <span id="confidence"></span></p>
+      <ul id="assumptions"></ul>
+      <p style="font-size:13px"><b>Private data that would improve accuracy:</b></p>
+      <ul id="upgrades"></ul>
+    </div>
+  </div>
+</main>
+
+<script>
+// ---- tiny dependency-free line chart ----------------------------------
+function drawChart(canvasId, labels, series) {
+  const canvas = document.getElementById(canvasId);
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight || 240;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
+  const padL = 44, padR = 10, padT = 10, padB = 24;
+  const all = series.flatMap(s => s.data);
+  let min = Math.min(...all), max = Math.max(...all);
+  if (min === max) { min -= 1; max += 1; }
+  const span = max - min; min -= span * 0.08; max += span * 0.08;
+  const x = i => padL + (w - padL - padR) * i / (labels.length - 1);
+  const y = v => padT + (h - padT - padB) * (1 - (v - min) / (max - min));
+  ctx.font = '11px system-ui'; ctx.fillStyle = '#a89e91'; ctx.strokeStyle = '#35302a';
+  for (let g = 0; g <= 4; g++) {
+    const v = min + (max - min) * g / 4, yy = y(v);
+    ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(w - padR, yy); ctx.stroke();
+    ctx.fillText(v.toFixed(1), 4, yy + 4);
+  }
+  for (let i = 0; i < labels.length; i += 6) ctx.fillText(labels[i], x(i) - 10, h - 6);
+  for (const s of series) {
+    ctx.strokeStyle = s.color; ctx.lineWidth = 2; ctx.beginPath();
+    s.data.forEach((v, i) => i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v)));
+    ctx.stroke();
+  }
+}
+const hourLabel = t => t.slice(11, 16) || t;
+
+// ---- simulation --------------------------------------------------------
+async function post(url, body) {
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                               body: JSON.stringify(body) });
+  if (!r.ok) throw new Error(url + ' -> HTTP ' + r.status + ': ' + await r.text());
+  return r.json();
+}
+
+async function run() {
+  const btn = document.getElementById('run'), status = document.getElementById('status');
+  btn.disabled = true; status.textContent = 'Fetching public weather and running the model…';
+  try {
+    const req = {
+      latitude: 29.2733, longitude: 47.9770,   // 360 Mall, Kuwait
+      building_type: document.getElementById('btype').value,
+      area_m2: parseFloat(document.getElementById('area').value),
+      operating_hours: { start_hour: parseInt(document.getElementById('open').value),
+                         end_hour: parseInt(document.getElementById('close').value) },
+      event_day: document.getElementById('event').value === 'true',
+      occupancy_level: document.getElementById('occ').value,
+    };
+    const [risk, cooling] = await Promise.all([post('/risk/heat', req), post('/cooling/estimate', req)]);
+    const plan = await post('/actions/recommend', {
+      risk_score: risk.heat_risk_score, building_type: req.building_type,
+      peak_window_start_hour: risk.peak_cooling_window.start_hour,
+      peak_window_end_hour: Math.min(risk.peak_cooling_window.end_hour, 24),
+      event_day: req.event_day,
+    });
+    render(risk, cooling, plan);
+    status.textContent = 'Done — weather source: ' + risk.weather.source;
+  } catch (e) {
+    status.textContent = 'Error: ' + e.message;
+  } finally { btn.disabled = false; }
+}
+
+function render(risk, cooling, plan) {
+  document.getElementById('results').style.display = 'grid';
+  const cat = risk.risk_category;
+  const scoreEl = document.getElementById('score');
+  scoreEl.textContent = risk.heat_risk_score + ' / 100';
+  scoreEl.className = 'v cat-' + cat.replace(' ', '');
+  document.getElementById('category').textContent = cat + ' risk';
+  const w = risk.peak_cooling_window;
+  document.getElementById('window').textContent =
+    String(w.start_hour).padStart(2, '0') + ':00–' + String(w.end_hour).padStart(2, '0') + ':00';
+  document.getElementById('peak').textContent = cooling.peak_demand_mw.toFixed(1) + ' MW';
+  document.getElementById('peakhour').textContent = 'around ' + hourLabel(cooling.peak_hour);
+  const sc = cooling.scorch_scenario;
+  document.getElementById('reduction').textContent =
+    '−' + sc.peak_reduction_mw.toFixed(1) + ' MW (' + sc.peak_reduction_pct + '%)';
+  document.getElementById('energydelta').textContent =
+    'daily energy ' + (sc.daily_energy_change_pct >= 0 ? '+' : '') + sc.daily_energy_change_pct + '% (estimate)';
+  document.getElementById('wsource').textContent =
+    risk.weather.source + (risk.weather.is_live ? ' (live)' : ' (offline fallback)');
+
+  const labels = cooling.hours.map(hourLabel);
+  drawChart('tempChart', risk.weather.points.map(p => hourLabel(p.time)),
+    [{ data: risk.hourly_temperature_c, color: '#ff7a45' }]);
+  drawChart('demandChart', labels, [
+    { data: cooling.hourly_demand_mw, color: '#ff7a45' },
+    { data: cooling.cooling_demand_mw, color: '#5aa9e6' },
+    { data: cooling.baseline_demand_mw, color: '#a89e91' }]);
+  drawChart('scorchChart', labels, [
+    { data: sc.baseline_mw, color: '#ff7a45' },
+    { data: sc.scorch_mw, color: '#7bc47f' }]);
+
+  const li = items => '<ul>' + items.map(i => '<li>' + i + '</li>').join('') + '</ul>';
+  document.getElementById('actions').innerHTML =
+    '<p><b>Pre-cooling:</b> ' + plan.pre_cooling_window + '</p>' +
+    '<p><b>Peak protection:</b> ' + plan.peak_protection_window + '</p>' +
+    '<p><b>Non-critical zone reductions:</b></p>' + li(plan.noncritical_zone_reductions) +
+    '<p><b>Readiness checks:</b></p>' + li(plan.readiness_checks) +
+    '<p><b>Comfort protection:</b></p>' + li(plan.comfort_protection_notes) +
+    '<p><b>What NOT to do:</b></p>' + li(plan.what_not_to_do);
+
+  document.getElementById('disclaimer').textContent = risk.disclaimer;
+  document.getElementById('confidence').textContent = risk.confidence;
+  document.getElementById('assumptions').innerHTML =
+    cooling.assumptions.map(a => '<li>' + a + '</li>').join('');
+  document.getElementById('upgrades').innerHTML =
+    risk.data_that_would_improve_accuracy.map(a => '<li>' + a + '</li>').join('');
+}
+
+document.getElementById('run').addEventListener('click', run);
+</script>
+</body>
+</html>
