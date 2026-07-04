@@ -16,6 +16,13 @@ PUBLIC_DATA_DISCLAIMER = (
     "This is a public-data estimate, not a verified meter/BMS result."
 )
 
+# Disclaimer attached to every grid-layer output. SCORCH never claims real
+# utility telemetry.
+GRID_DISCLAIMER = (
+    "This is a public-data/synthetic estimate, not verified MEWRE meter, "
+    "SCADA, dispatch, or fuel telemetry."
+)
+
 # Private data that would move this from a screening estimate to a
 # calibrated model. Returned with every response.
 DATA_UPGRADES = [
@@ -186,6 +193,36 @@ class FuelImpactResponse(BaseModel):
     confidence: str
     assumptions: list[str]
     data_that_would_improve_accuracy: list[str] = DATA_UPGRADES
+
+
+MixScenario = Literal[
+    "generic_kuwait_grid", "gas_priority", "diesel_backup_stress", "oil_heavy_stress"
+]
+
+
+class DispatchRequest(BaseModel):
+    """Input for /grid/dispatch-simulate — a screening dispatch, not MEWRE."""
+
+    total_estimated_load_mw: float = Field(..., gt=0, le=30_000)
+    reserve_margin_percent: float = Field(10.0, ge=0, le=50)
+    generator_mix_scenario: MixScenario = "generic_kuwait_grid"
+    temperature_c: float = Field(45.0, ge=-10, le=60)
+    apparent_temperature_c: Optional[float] = None
+
+
+class DispatchResponse(BaseModel):
+    disclaimer: str = GRID_DISCLAIMER
+    scenario: str
+    estimated_generation_needed_mw: float
+    estimated_available_capacity_mw: float
+    estimated_reserve_mw: float
+    reserve_status: str
+    estimated_fuel_burn_per_hour: dict[str, dict[str, float]]  # fuel -> units
+    estimated_emissions_per_hour: dict[str, float]  # co2_tonnes
+    estimated_marginal_plant: str
+    grid_stress: dict
+    confidence: str
+    assumptions: list[str]
 
 
 class ActionRequest(BaseModel):

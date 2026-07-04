@@ -112,6 +112,15 @@ curl "http://127.0.0.1:8000/demo/360-mall?event_day=true&occupancy_level=high"
 | `POST /grid/fuel-impact` | Avoided MWh, fuel, CO₂ for a peak reduction (5 generator archetypes) |
 | `GET /report/{slug}` | Printable HTML heat-risk report for one asset |
 | `GET /report/portfolio/kuwait` | Printable portfolio report ranking all example assets |
+| `GET /grid` | Grid-Aware Kuwait dashboard (map-first, KPIs, timeline, details panel) |
+| `GET /grid/assets` | All grid-relevant assets (stations, corridors, buildings, cells) |
+| `GET /grid/power-stations` | Built-in Kuwait power stations (public-data profiles) |
+| `GET /grid/osm-power?bbox=` | OSM power infrastructure via Overpass, fallback skeleton offline |
+| `GET /buildings/footprints?bbox=&limit=` | OSM building footprints, demand-classified, fallback offline |
+| `GET /grid/demand-layer?hour_offset=` | District demand cells (now/+6h/…/peak7d) |
+| `POST /grid/dispatch-simulate` | Screening dispatch/fuel-burn simulation (not MEWRE) |
+| `GET /grid/overview` | Climate→demand→stress→fuel KPI bundle |
+| `GET /grid/report/kuwait` | Printable Grid-Aware Kuwait report |
 | `GET /map/assets` | Built-in example assets as a GeoJSON FeatureCollection |
 | `GET /map/assets/{slug}` | One example asset as GeoJSON (404 if unknown) |
 | `GET /map/risk-layer` | Risk-scored GeoJSON layer (marker colors, peak windows, summaries) |
@@ -156,6 +165,55 @@ dispatch or prices, comfort outcomes in specific zones. Every response says so.
 tool that needs zero private data means a facility manager can see their risk profile
 *before* any integration work, and the upgrade path (bills → meters → BMS) is where the
 accuracy — and the business — grows.
+
+## Grid-Aware Kuwait MVP
+
+`GET /grid` is a map-first, professional dashboard that shows the whole SCORCH chain:
+**weather forecast → building cooling pressure → district demand → grid stress → power
+station/fuel impact → operational view.**
+
+> ⚡ **This is a public-data/synthetic estimate, not verified MEWRE meter, SCADA, dispatch,
+> or fuel telemetry.** SCORCH estimates climate-driven grid stress from public data.
+> Verified deployment requires MEWRE/utility meter, SCADA, dispatch, and fuel telemetry access.
+
+**Run it:** `uvicorn app.main:app --reload` → open `http://127.0.0.1:8000/grid`.
+Printable report: `http://127.0.0.1:8000/grid/report/kuwait`.
+
+**What is public/open data:**
+- Open-Meteo hourly forecast (free, no key) with a synthetic Kuwait fallback.
+- OpenStreetMap/Overpass for power infrastructure (`power=plant/substation/line/tower/
+  transformer/pole`) and building footprints (ODbL, coverage varies).
+- Power-station names/locations/capacities from public reports — coordinates and MW are
+  **approximate**, and fuel/technology is `mixed`/`unknown` where not confidently public.
+
+**What is simulated/assumed (clearly labelled):**
+- District demand cells: coarse rectangles with assumed `base_mw` + `cooling_mw_per_c`
+  parameters scaled to Kuwait's public ~17 GW summer peak. Homes are aggregated to
+  district level by design — no household identity or per-meter consumption exists here.
+- Dispatch/fuel burn (`POST /grid/dispatch-simulate`): scenario fuel shares
+  (generic mix / gas priority / diesel stress / oil-heavy) with typical heat rates and
+  standard emission factors. **Not MEWRE dispatch.**
+- Grid stress: estimated demand vs assumed ~19.5 GW installed capacity, heat-derated.
+- Transmission corridors: illustrative fallback lines unless OSM `power=line` loads.
+
+**What cannot be claimed:** actual real-time MEWRE dispatch, actual household/meter
+consumption, actual gas/diesel burn, exact grid operation, feeder-level congestion.
+Every grid endpoint and page carries the disclaimer, and a test enforces it.
+
+**Why this matters for Kuwait:** cooling dominates Kuwait's summer peak; heat waves move
+national demand by gigawatts within hours. A public-data "grid digital shadow" lets
+planners, researchers, and facility owners see climate→grid coupling *before* any data
+sharing agreement — and shows MEWRE exactly what a verified deployment would unlock.
+
+**Future path:**
+| Level | Data | Capability |
+|---|---|---|
+| **0 (this MVP)** | Public/open data only | Grid digital shadow: screening demand, stress, fuel estimates |
+| **1** | + monthly national load reports | Calibrated seasonal/regional demand model |
+| **2** | Utility-approved feeder/substation data | Real congestion and district accuracy |
+| **3** | Smart meter/BMS integration | Verified building→district demand, measured savings |
+| **4** | Real dispatch advisory | Operational peak orchestration with the utility |
+| **5** | SCADA/EMS integration | Only with official utility partnership |
 
 ## Map Layer Strategy
 
@@ -219,13 +277,18 @@ scorch_public_api/
 │   ├── map_layers.py       # GeoJSON builders + per-asset risk layer
 │   ├── outlook.py          # 7-day daily heat/cooling outlook
 │   ├── grid_impact.py      # avoided MWh/fuel/CO2 screening estimates
-│   └── reports.py          # printable HTML asset + portfolio reports
+│   ├── grid_assets.py      # Kuwait power stations + district demand cells (public assumptions)
+│   ├── grid_model.py       # district demand, grid stress, dispatch/fuel simulation
+│   ├── grid_sources.py     # OSM power/buildings fetchers + labelled fallbacks
+│   └── reports.py          # printable HTML asset/portfolio/grid reports
 ├── dashboard/
-│   └── index.html          # dashboard + Leaflet/OSM map (served at /dashboard)
+│   ├── index.html          # asset dashboard + Leaflet/OSM map (served at /dashboard)
+│   └── grid.html           # Grid-Aware Kuwait dashboard (served at /grid)
 ├── tests/
 │   ├── test_risk_model.py
 │   ├── test_map_layers.py
-│   └── test_demo_pack.py
+│   ├── test_demo_pack.py
+│   └── test_grid.py
 └── examples/
     └── sample_360_mall_request.json
 ```

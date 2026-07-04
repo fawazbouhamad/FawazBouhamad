@@ -7,12 +7,20 @@ Reports use a light theme so they print cleanly from the browser
 
 from __future__ import annotations
 
-from . import risk_model
+from . import grid_model, risk_model
 from .assets import EXAMPLE_ASSETS
 from .data_sources import get_weather
+from .grid_assets import POWER_STATIONS
 from .grid_impact import compute_fuel_impact
 from .map_layers import RISK_COLORS, asset_to_request, get_asset_or_404
-from .models import ActionRequest, FuelImpactRequest, PUBLIC_DATA_DISCLAIMER, DATA_UPGRADES
+from .models import (
+    ActionRequest,
+    DispatchRequest,
+    FuelImpactRequest,
+    GRID_DISCLAIMER,
+    PUBLIC_DATA_DISCLAIMER,
+    DATA_UPGRADES,
+)
 from .outlook import build_weekly_outlook
 from .recommendations import build_action_plan
 
@@ -235,3 +243,133 @@ assumptions (approximate coordinates, areas, archetype intensities).</div>
 or actual grid dispatch. Click an asset name for its full report.</p>
 """
     return _page("SCORCH Kuwait portfolio report", body)
+
+
+def grid_report_html() -> str:
+    """Printable Grid-Aware Kuwait public-data summary report."""
+    overview = grid_model.climate_grid_overview(0)
+    peak = grid_model.climate_grid_overview("peak7d")
+    layer = grid_model.demand_layer(0)
+    dispatch = grid_model.dispatch_simulate(DispatchRequest(
+        total_estimated_load_mw=overview["estimated_total_demand_mw"],
+        temperature_c=overview["temperature_c"],
+    ))
+    stress = overview["grid_stress"]
+    ci = overview["climate_impact"]
+    pci = peak["climate_impact"]  # cooling pressure is most meaningful at the peak
+
+    def _cap(st: dict) -> str:
+        cap = st["capacity_mw"]
+        return "n/a (not confidently public)" if cap is None else f"{cap:,.0f}"
+
+    station_rows = "".join(
+        f"<tr><td>{st['name']}</td><td>{st['fuel_type']}</td>"
+        f"<td>{st['generation_type']}</td>"
+        f"<td>{_cap(st)}</td>"
+        f"<td>{st['confidence']}</td></tr>"
+        for st in POWER_STATIONS
+    )
+    district_rows = "".join(
+        f"<tr><td>{p['name']}</td><td>{p['estimated_demand_mw']:,.0f}</td>"
+        f"<td>{p['estimated_cooling_mw']:,.0f}</td>"
+        f"<td>{p['cooling_share']:.0%}</td>"
+        f"<td>{p['peak_risk']}</td>"
+        f"<td>{', '.join(p['dominant_types'])}</td></tr>"
+        for p in (f["properties"] for f in sorted(
+            layer["features"],
+            key=lambda f: f["properties"]["estimated_demand_mw"], reverse=True))
+    )
+    fuel_rows = "".join(
+        f"<tr><td>{fuel.replace('_', ' ')}</td><td>{e['mwh']:,.0f}</td>"
+        f"<td>{e['energy_gj']:,.0f}</td>"
+        f"<td>{e.get('volume_m3', e.get('volume_litres', 0)):,.0f} "
+        f"{'m³' if 'volume_m3' in e else 'L'}</td></tr>"
+        for fuel, e in dispatch.estimated_fuel_burn_per_hour.items()
+    )
+    li = lambda items: "".join(f"<li>{i}</li>" for i in items)  # noqa: E731
+
+    body = f"""
+<header class="rpt"><h1>⚡ SCORCH Grid-Aware Kuwait Report</h1>
+<div class="sub">Public-data grid digital shadow — Level 0 screening</div></header>
+<div class="disclaimer"><b>{GRID_DISCLAIMER}</b> SCORCH estimates climate-driven
+grid stress from public data. Verified deployment requires MEWRE/utility meter,
+SCADA, dispatch, and fuel telemetry access.</div>
+<div class="no-print" style="margin-bottom:10px">
+  <a class="btn" href="/grid">← Grid dashboard</a>
+  <a class="btn" href="/dashboard">Asset dashboard</a></div>
+
+<h2>Current estimated situation ({overview['when']}, {overview['timestamp']})</h2>
+<div class="cards">
+  <div class="card"><div class="k">Temperature</div><div class="v">{overview['temperature_c']:.1f} °C</div>
+    <div class="s">feels like {overview['apparent_temperature_c'] or '–'} °C · {overview['weather_source']}</div></div>
+  <div class="card"><div class="k">Est. metro demand</div><div class="v">{overview['estimated_total_demand_mw']:,.0f} MW</div>
+    <div class="s">≈ {overview['estimated_national_demand_mw']:,.0f} MW national est. (assumed 70% coverage)</div></div>
+  <div class="card"><div class="k">Est. cooling demand</div><div class="v">{overview['estimated_cooling_demand_mw']:,.0f} MW</div>
+    <div class="s">{overview['estimated_cooling_demand_mw']/max(overview['estimated_total_demand_mw'],1)*100:.0f}% of estimated load</div></div>
+  <div class="card"><div class="k">Grid stress (est.)</div>
+    <div class="v"><span class="chip" style="background:{stress['color']}">{stress['level']}</span></div>
+    <div class="s">demand/capacity ≈ {stress['demand_to_capacity_ratio']}</div></div>
+</div>
+<p class="muted">7-day peak scenario: {peak['estimated_total_demand_mw']:,.0f} MW estimated at
+{peak['temperature_c']:.1f} °C ({peak['timestamp']}), stress level {peak['grid_stress']['level']}.</p>
+
+<h2>Power station layer (public-data profiles)</h2>
+<table><tr><th>Station</th><th>Fuel</th><th>Technology</th><th>≈ MW</th><th>Confidence</th></tr>
+{station_rows}</table>
+<p class="muted">Coordinates approximate; capacities are approximate public figures;
+'mixed'/'unknown' used where not confidently public. Transmission corridors shown on the
+map are illustrative fallbacks unless OSM power=line data is loaded.</p>
+
+<h2>District demand layer (estimated, aggregated)</h2>
+<table><tr><th>District cell</th><th>Est. MW</th><th>Est. cooling MW</th>
+<th>Cooling share</th><th>Peak risk</th><th>Dominant building types</th></tr>
+{district_rows}</table>
+<p class="muted">Homes are aggregated to district cells by design — no household
+identity or per-meter consumption is shown or known.</p>
+
+<h2>Climate-driven cooling pressure (at the 7-day peak, {peak['temperature_c']:.1f} °C)</h2>
+<div class="cards">
+  <div class="card"><div class="k">Added cooling vs 35 °C day</div><div class="v">+{pci['added_cooling_mw_vs_35c']:,.0f} MW</div></div>
+  <div class="card"><div class="k">Added gas burn (est.)</div><div class="v">{pci['added_gas_burn_gj_per_hour']:,.0f} GJ/h</div></div>
+  <div class="card"><div class="k">Added CO₂ (est.)</div><div class="v">{pci['added_co2_tonnes_per_hour']:,.0f} t/h</div></div>
+  <div class="card"><div class="k">Most stressed cell</div><div class="v" style="font-size:15px">{pci['most_stressed_district']}</div>
+    <div class="s">{', '.join(pci['most_stressed_building_types'])}</div></div>
+</div>
+<p class="muted">Right now ({overview['temperature_c']:.1f} °C): +{ci['added_cooling_mw_vs_35c']:,.0f} MW added cooling vs a 35 °C reference day.</p>
+
+<h2>Simulated dispatch / fuel burn (scenario: {dispatch.scenario})</h2>
+<div class="cards">
+  <div class="card"><div class="k">Generation needed</div><div class="v">{dispatch.estimated_generation_needed_mw:,.0f} MW</div><div class="s">incl. assumed losses</div></div>
+  <div class="card"><div class="k">Est. reserve</div><div class="v">{dispatch.estimated_reserve_mw:,.0f} MW</div><div class="s">{dispatch.reserve_status}</div></div>
+  <div class="card"><div class="k">Est. CO₂</div><div class="v">{dispatch.estimated_emissions_per_hour['co2_tonnes']:,.0f} t/h</div></div>
+  <div class="card"><div class="k">Marginal plant (assumed)</div><div class="v" style="font-size:14px">{dispatch.estimated_marginal_plant}</div></div>
+</div>
+<table><tr><th>Fuel</th><th>MWh/h</th><th>Energy GJ/h</th><th>Volume/h</th></tr>{fuel_rows}</table>
+
+<h2>Limitations</h2>
+<ul>
+<li>This is a public-data digital shadow: district demand, dispatch shares, fuel burn,
+and stress are all screening estimates from assumptions listed above.</li>
+<li>No MEWRE meter, SCADA, dispatch, or fuel telemetry is used — and none is claimed.</li>
+<li>OSM power/building coverage in Kuwait is incomplete; fallback layers are labelled.</li>
+<li>Weather is a point forecast at the metro centre; microclimates are not modelled.</li>
+</ul>
+
+<h2>Public data sources used</h2>
+<ul>
+<li>Open-Meteo hourly forecast (free, no key) — this run: {overview['weather_source']}.</li>
+<li>OpenStreetMap / Overpass for power infrastructure and building footprints (ODbL).</li>
+<li>Public reports for approximate power-station names/locations/capacities.</li>
+<li>Built-in labelled fallbacks when live sources are unavailable.</li>
+</ul>
+
+<h2>Next data needed from MEWRE/utility for verified deployment</h2>
+<ul>{li([
+    "Hourly national and per-substation load (SCADA/EMS extracts).",
+    "Actual dispatch schedules and unit commitments per station.",
+    "Fuel consumption telemetry per station (gas/HFO/gasoil).",
+    "Feeder-level topology and ratings for real congestion analysis.",
+    "Smart-meter aggregates per district (privacy-preserving).",
+])}</ul>
+"""
+    return _page("SCORCH Grid-Aware Kuwait report", body)

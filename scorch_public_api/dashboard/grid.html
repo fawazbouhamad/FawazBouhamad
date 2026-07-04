@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SCORCH — Grid-Aware Kuwait</title>
+<!-- Leaflet (BSD-2, free) — best effort; page degrades gracefully offline. -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<style>
+  :root {
+    --bg: #0a0f1a; --panel: #101827; --panel2: #0d1420; --line: #1e293b;
+    --text: #e6edf6; --muted: #8296ad; --dim: #5b6b7f;
+    --accent: #38bdf8; --amber: #f6a821; --good: #34a763; --warn: #ef6c00; --crit: #dc3d3d;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg);
+         color: var(--text); display: flex; flex-direction: column; overflow: hidden; }
+
+  /* top bar */
+  .topbar { display: flex; align-items: center; gap: 16px; padding: 10px 18px;
+            border-bottom: 1px solid var(--line); background: var(--panel2); }
+  .brand { font-size: 16px; font-weight: 700; letter-spacing: 1.5px; white-space: nowrap; }
+  .brand em { color: var(--accent); font-style: normal; }
+  .honesty { flex: 1; font-size: 11px; color: var(--muted); line-height: 1.3; }
+  .topbar a { color: var(--accent); font-size: 12px; text-decoration: none;
+              border: 1px solid var(--line); padding: 5px 10px; border-radius: 6px; white-space: nowrap; }
+  .topbar a:hover { border-color: var(--accent); }
+
+  /* KPI row */
+  .kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1px;
+          background: var(--line); border-bottom: 1px solid var(--line); }
+  .kpi { background: var(--panel2); padding: 10px 14px; min-width: 0; }
+  .kpi .k { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); }
+  .kpi .v { font-size: 21px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kpi .s { font-size: 10.5px; color: var(--muted); margin-top: 1px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kpi .v .unit { font-size: 12px; color: var(--muted); font-weight: 500; }
+
+  /* main layout */
+  .main { flex: 1; display: grid; grid-template-columns: 232px 1fr 300px; min-height: 0; }
+  .sidebar, .details { background: var(--panel); overflow-y: auto; padding: 14px; }
+  .sidebar { border-right: 1px solid var(--line); }
+  .details { border-left: 1px solid var(--line); }
+  .sec { font-size: 10px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--dim);
+         margin: 14px 0 7px; } .sec:first-child { margin-top: 0; }
+  select { width: 100%; padding: 7px 8px; background: var(--bg); color: var(--text);
+           border: 1px solid var(--line); border-radius: 6px; font-size: 12.5px; }
+  .layer { display: flex; align-items: center; gap: 8px; padding: 5px 2px; font-size: 12.5px;
+           color: var(--text); cursor: pointer; user-select: none; }
+  .layer input { accent-color: var(--accent); }
+  .layer .sw { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+  .note { font-size: 10.5px; color: var(--muted); line-height: 1.45; border: 1px solid var(--line);
+          border-radius: 6px; padding: 8px; margin-top: 10px; background: var(--panel2); }
+  #srcStatus { font-size: 10.5px; color: var(--dim); margin-top: 8px; line-height: 1.4; }
+
+  /* map */
+  .mapwrap { position: relative; min-width: 0; }
+  #map { position: absolute; inset: 0; background: #060a12; }
+  #map .offline-note { color: var(--muted); padding: 28px; font-size: 13px; }
+  .leaflet-container { font: inherit; }
+
+  /* details */
+  .details h3 { font-size: 13px; margin-bottom: 8px; }
+  .kv { font-size: 12px; border-bottom: 1px solid var(--line); padding: 5px 0;
+        display: flex; justify-content: space-between; gap: 10px; }
+  .kv .k { color: var(--muted); flex: none; }
+  .kv .v { text-align: right; word-break: break-word; }
+  .chip { display: inline-block; padding: 0 8px; border-radius: 9px; color: #fff;
+          font-size: 10.5px; font-weight: 700; }
+  .details .placeholder { color: var(--dim); font-size: 12px; line-height: 1.5; }
+
+  /* timeline */
+  .timeline { display: flex; align-items: center; gap: 8px; padding: 9px 18px;
+              border-top: 1px solid var(--line); background: var(--panel2); }
+  .timeline .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); }
+  .tchip { padding: 5px 13px; border: 1px solid var(--line); border-radius: 14px; font-size: 12px;
+           color: var(--muted); cursor: pointer; background: transparent; }
+  .tchip.active { background: var(--accent); color: #062033; border-color: var(--accent); font-weight: 700; }
+  .timeline .when { margin-left: auto; font-size: 11px; color: var(--muted); }
+  @media (max-width: 1000px) { .main { grid-template-columns: 200px 1fr; } .details { display: none; }
+                               .kpis { grid-template-columns: repeat(3, 1fr); } }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">⚡ SCORCH <em>· Grid-Aware Kuwait</em></div>
+  <div class="honesty">SCORCH estimates climate-driven grid stress from public data.
+    This is a public-data/synthetic estimate, not verified MEWRE meter, SCADA, dispatch, or fuel
+    telemetry. Verified deployment requires MEWRE/utility data access.</div>
+  <a href="/grid/report/kuwait" target="_blank">Grid report</a>
+  <a href="/dashboard">Asset dashboard</a>
+</div>
+
+<div class="kpis">
+  <div class="kpi"><div class="k">Est. metro demand</div><div class="v" id="kDemand">–</div><div class="s" id="kDemandS">district cells · estimate</div></div>
+  <div class="kpi"><div class="k">Est. cooling demand</div><div class="v" id="kCooling">–</div><div class="s" id="kCoolingS">–</div></div>
+  <div class="kpi"><div class="k">Grid stress (est.)</div><div class="v" id="kStress">–</div><div class="s" id="kStressS">–</div></div>
+  <div class="kpi"><div class="k">Est. gas burn</div><div class="v" id="kGas">–</div><div class="s" id="kGasS">–</div></div>
+  <div class="kpi"><div class="k">Est. CO₂</div><div class="v" id="kCO2">–</div><div class="s">per hour · simulated mix</div></div>
+  <div class="kpi"><div class="k">Highest-risk district</div><div class="v" id="kTop" style="font-size:14px">–</div><div class="s" id="kTopS">–</div></div>
+</div>
+
+<div class="main">
+  <div class="sidebar">
+    <div class="sec">Dispatch scenario (simulated)</div>
+    <select id="scenario">
+      <option value="generic_kuwait_grid">Generic Kuwait grid mix</option>
+      <option value="gas_priority">Gas priority</option>
+      <option value="diesel_backup_stress">Diesel backup stress</option>
+      <option value="oil_heavy_stress">Oil-heavy stress</option>
+    </select>
+
+    <div class="sec">Map layers</div>
+    <label class="layer"><input type="checkbox" id="lyStations" checked><span class="sw" style="background:var(--amber)"></span>Power stations</label>
+    <label class="layer"><input type="checkbox" id="lyLines" checked><span class="sw" style="background:#7f8ea3"></span>Transmission lines</label>
+    <label class="layer"><input type="checkbox" id="lySubs"><span class="sw" style="background:var(--accent)"></span>Substations &amp; towers (OSM)</label>
+    <label class="layer"><input type="checkbox" id="lyBuildings"><span class="sw" style="background:#c5a3ff"></span>Buildings / homes (OSM)</label>
+    <label class="layer"><input type="checkbox" id="lyDemand" checked><span class="sw" style="background:var(--warn)"></span>District demand (est.)</label>
+    <label class="layer"><input type="checkbox" id="lyHeat"><span class="sw" style="background:var(--crit)"></span>Climate heat</label>
+    <label class="layer"><input type="checkbox" id="lyAssets"><span class="sw" style="background:var(--good)"></span>Example assets</label>
+
+    <div class="sec">Climate impact on grid</div>
+    <div class="note" id="climateCard">Loading…</div>
+
+    <div class="note"><b>Honesty box.</b> District demand, dispatch, fuel burn and stress are
+      screening estimates from public assumptions. Homes are aggregated to district cells —
+      no household identity or per-meter data is shown or known. OSM coverage varies;
+      fallback layers are labelled <i>fallback_public_assumption</i>.</div>
+    <div id="srcStatus"></div>
+  </div>
+
+  <div class="mapwrap"><div id="map"></div></div>
+
+  <div class="details">
+    <div class="sec">Details</div>
+    <div id="detail" class="placeholder">Click a power station, district cell, or building
+      on the map to inspect its public-data profile and estimates.</div>
+  </div>
+</div>
+
+<div class="timeline">
+  <span class="lbl">Timeline</span>
+  <button class="tchip active" data-off="0">Now</button>
+  <button class="tchip" data-off="6">+6h</button>
+  <button class="tchip" data-off="12">+12h</button>
+  <button class="tchip" data-off="24">+24h</button>
+  <button class="tchip" data-off="48">+48h</button>
+  <button class="tchip" data-off="peak7d">7-day peak</button>
+  <span class="when" id="whenLabel">–</span>
+</div>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+let map = null, offset = '0';
+const layers = {};           // name -> L.layerGroup
+let osmPowerLoaded = false, buildingsLoaded = false;
+const srcNotes = {};
+const setSrc = (k, v) => { srcNotes[k] = v;
+  $('srcStatus').innerHTML = Object.values(srcNotes).join('<br>'); };
+
+const fmt = (n, d = 0) => n == null ? '–' : Number(n).toLocaleString(undefined,
+  { maximumFractionDigits: d });
+
+// ---------- KPIs + climate card ------------------------------------------
+async function loadOverview() {
+  try {
+    const o = await (await fetch('/grid/overview?hour_offset=' + offset +
+      '&scenario=' + $('scenario').value)).json();
+    $('kDemand').innerHTML = fmt(o.estimated_total_demand_mw) + ' <span class="unit">MW</span>';
+    $('kDemandS').textContent = '≈ ' + fmt(o.estimated_national_demand_mw) +
+      ' MW national est. (assumed 70% coverage)';
+    $('kCooling').innerHTML = fmt(o.estimated_cooling_demand_mw) + ' <span class="unit">MW</span>';
+    $('kCoolingS').textContent =
+      Math.round(100 * o.estimated_cooling_demand_mw / Math.max(o.estimated_total_demand_mw, 1)) +
+      '% of estimated load';
+    const st = o.grid_stress;
+    $('kStress').innerHTML = '<span class="chip" style="background:' + st.color + '">' + st.level + '</span>';
+    $('kStressS').textContent = 'demand/capacity ≈ ' + st.demand_to_capacity_ratio;
+    const gas = o.dispatch.estimated_fuel_burn_per_hour.natural_gas || {};
+    $('kGas').innerHTML = fmt(gas.energy_gj) + ' <span class="unit">GJ/h</span>';
+    $('kGasS').textContent = fmt(gas.volume_m3) + ' m³/h · scenario: ' + o.dispatch.scenario;
+    $('kCO2').innerHTML = fmt(o.dispatch.estimated_emissions_per_hour.co2_tonnes) +
+      ' <span class="unit">t/h</span>';
+    $('kTop').textContent = o.climate_impact.most_stressed_district;
+    $('kTopS').textContent = o.climate_impact.most_stressed_building_types.join(', ');
+    $('whenLabel').textContent = o.when + ' · ' + o.timestamp + ' · ' +
+      o.temperature_c.toFixed(1) + '°C · ' + o.weather_source +
+      (o.is_live_weather ? ' (live)' : ' (synthetic fallback)');
+    const ci = o.climate_impact;
+    $('climateCard').innerHTML =
+      'Temp <b>' + o.temperature_c.toFixed(1) + '°C</b> (feels ' +
+      (o.apparent_temperature_c == null ? '–' : o.apparent_temperature_c.toFixed(1)) + '°C)<br>' +
+      'Added cooling vs 35°C day: <b>+' + fmt(ci.added_cooling_mw_vs_35c) + ' MW</b><br>' +
+      'Added gas burn: <b>' + fmt(ci.added_gas_burn_gj_per_hour) + ' GJ/h</b><br>' +
+      'Added CO₂: <b>' + fmt(ci.added_co2_tonnes_per_hour) + ' t/h</b><br>' +
+      'Most stressed: <b>' + ci.most_stressed_district + '</b>';
+  } catch (e) { $('climateCard').textContent = 'Overview failed: ' + e.message; }
+}
+
+// ---------- details panel --------------------------------------------------
+function showDetails(title, rows) {
+  $('detail').className = '';
+  $('detail').innerHTML = '<h3>' + title + '</h3>' + rows.map(([k, v]) =>
+    '<div class="kv"><span class="k">' + k + '</span><span class="v">' + v + '</span></div>'
+  ).join('');
+}
+
+// ---------- map layers ------------------------------------------------------
+const stressColor = p => ({ 'Low': '#34a763', 'Moderate': '#f6a821',
+  'High': '#ef6c00', 'Very High': '#dc3d3d' })[p] || '#8296ad';
+
+async function loadDemandLayer() {
+  if (!map) return;
+  try {
+    const fc = await (await fetch('/grid/demand-layer?hour_offset=' + offset)).json();
+    layers.demand.clearLayers(); layers.heat.clearLayers();
+    L.geoJSON(fc, {
+      style: f => ({ color: stressColor(f.properties.peak_risk), weight: 1.2,
+                     fillColor: stressColor(f.properties.peak_risk),
+                     fillOpacity: 0.10 + 0.35 * Math.min(f.properties.cooling_share, 1) }),
+      onEachFeature: (f, l) => l.on('click', () => {
+        const p = f.properties;
+        showDetails('District: ' + p.name, [
+          ['Est. demand', fmt(p.estimated_demand_mw) + ' MW'],
+          ['Est. cooling', fmt(p.estimated_cooling_mw) + ' MW (' + Math.round(p.cooling_share * 100) + '%)'],
+          ['Est. base', fmt(p.estimated_base_mw) + ' MW'],
+          ['Peak risk', '<span class="chip" style="background:' + stressColor(p.peak_risk) + '">' + p.peak_risk + '</span>'],
+          ['Temperature', p.temperature_c + '°C (feels ' + (p.apparent_temperature_c ?? '–') + '°C)'],
+          ['Building mix', p.dominant_types.join(', ')],
+          ['Activity factor', p.activity_factor],
+          ['Note', p.disclaimer],
+        ]);
+      }),
+    }).addTo(layers.demand);
+    // climate heat layer: translucent thermal circles at cell centres
+    for (const f of fc.features) {
+      const ring = f.geometry.coordinates[0];
+      const lat = (ring[0][1] + ring[2][1]) / 2, lon = (ring[0][0] + ring[2][0]) / 2;
+      const t = f.properties.temperature_c;
+      L.circle([lat, lon], { radius: 2600 + 90 * Math.max(t - 30, 0), stroke: false,
+        fillColor: t >= 45 ? '#dc3d3d' : t >= 38 ? '#ef6c00' : '#f6a821',
+        fillOpacity: 0.18 }).addTo(layers.heat);
+    }
+    setSrc('demand', 'Demand cells: assumed parameters · weather ' + fc.properties.weather_source);
+  } catch (e) { setSrc('demand', 'Demand layer failed: ' + e.message); }
+}
+
+async function loadStations() {
+  try {
+    const fc = await (await fetch('/grid/power-stations')).json();
+    for (const f of fc.features) {
+      const p = f.properties, [lon, lat] = f.geometry.coordinates;
+      const r = p.capacity_mw ? 6 + Math.sqrt(p.capacity_mw) / 5 : 6;
+      L.circleMarker([lat, lon], { radius: r, fillColor: '#f6a821', fillOpacity: 0.9,
+        color: '#0a0f1a', weight: 1.5 })
+        .on('click', () => showDetails('⚡ ' + p.name, [
+          ['Fuel type', p.fuel_type], ['Technology', p.generation_type],
+          ['Capacity', p.capacity_mw ? fmt(p.capacity_mw) + ' MW (approx.)' : 'not confidently public'],
+          ['Capacity note', p.capacity_note], ['Confidence', p.confidence],
+          ['Source', p.source], ['Note', p.disclaimer],
+        ])).addTo(layers.stations);
+    }
+    setSrc('stations', 'Stations: public reports (approximate values)');
+  } catch (e) { setSrc('stations', 'Stations failed: ' + e.message); }
+}
+
+async function loadCorridors() {
+  try {
+    const fc = await (await fetch('/grid/assets')).json();
+    for (const f of fc.features) {
+      if (f.properties.layer === 'transmission_corridor') {
+        L.polyline(f.geometry.coordinates.map(c => [c[1], c[0]]),
+          { color: '#7f8ea3', weight: 1.5, dashArray: '7 5', opacity: 0.7 })
+          .on('click', () => showDetails(f.properties.name, [
+            ['Source', f.properties.source], ['Note', f.properties.note],
+          ])).addTo(layers.lines);
+      } else if (f.properties.layer === 'example_building') {
+        const p = f.properties, [lon, lat] = f.geometry.coordinates;
+        L.circleMarker([lat, lon], { radius: 5, fillColor: '#34a763', fillOpacity: 0.9,
+          color: '#0a0f1a', weight: 1 })
+          .on('click', () => showDetails('🏢 ' + p.name, [
+            ['Type', p.building_type], ['Area', fmt(p.area_m2) + ' m²'],
+            ['Asset report', '<a style="color:var(--accent)" target="_blank" href="/report/' +
+              p.slug + '">open ↗</a>'],
+            ['Note', p.disclaimer],
+          ])).addTo(layers.assets);
+      }
+    }
+  } catch (e) { setSrc('corridors', 'Grid assets failed: ' + e.message); }
+}
+
+async function loadOsmPower() {
+  if (osmPowerLoaded || !map) return;
+  osmPowerLoaded = true;
+  setSrc('osm', 'Fetching OSM power infrastructure (Overpass, optional)…');
+  try {
+    const b = map.getBounds();
+    const bbox = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()]
+      .map(x => x.toFixed(3)).join(',');
+    const fc = await (await fetch('/grid/osm-power?bbox=' + bbox)).json();
+    const fb = fc.properties.source === 'fallback_public_assumption';
+    for (const f of fc.features) {
+      const p = f.properties;
+      if (f.geometry.type === 'Point') {
+        const [lon, lat] = f.geometry.coordinates;
+        L.circleMarker([lat, lon], { radius: p.power === 'substation' ? 5 : 2.5,
+          fillColor: '#38bdf8', fillOpacity: 0.85, weight: 0 })
+          .on('click', () => showDetails('OSM: ' + p.power, [
+            ['Name', p.name || '–'], ['Voltage', p.voltage || '–'], ['Source', p.source],
+          ])).addTo(layers.subs);
+      } else if (f.geometry.type === 'LineString') {
+        L.polyline(f.geometry.coordinates.map(c => [c[1], c[0]]),
+          { color: '#38bdf8', weight: 1.4, opacity: 0.8 }).addTo(layers.subs);
+      }
+    }
+    setSrc('osm', fb
+      ? 'OSM power unavailable — showing labelled fallback skeleton.'
+      : 'OSM power: ' + fc.features.length + ' features · © OpenStreetMap (ODbL)');
+  } catch (e) { setSrc('osm', 'OSM power failed: ' + e.message); }
+}
+
+async function loadBuildings() {
+  if (buildingsLoaded || !map) return;
+  buildingsLoaded = true;
+  setSrc('bld', 'Fetching public building footprints (OSM, optional)…');
+  try {
+    const b = map.getBounds();
+    const bbox = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()]
+      .map(x => x.toFixed(3)).join(',');
+    const fc = await (await fetch('/buildings/footprints?bbox=' + bbox + '&limit=300')).json();
+    const fb = fc.properties.source === 'fallback_public_assumption';
+    L.geoJSON(fc, {
+      style: { color: '#c5a3ff', weight: 1, fillOpacity: 0.25 },
+      onEachFeature: (f, l) => l.on('click', () => {
+        const p = f.properties;
+        showDetails('Building (' + p.demand_class + ')', [
+          ['OSM tag', p.building], ['Demand class', p.demand_class],
+          ['Approx. area', fmt(p.approx_area_m2) + ' m²'],
+          ['Confidence', p.confidence], ['Source', p.source],
+        ]);
+      }),
+    }).addTo(layers.buildings);
+    setSrc('bld', fb
+      ? 'OSM buildings unavailable — synthetic placeholder blocks shown (labelled).'
+      : 'Buildings: ' + fc.features.length + ' OSM footprints (coverage incomplete) · ODbL');
+  } catch (e) { setSrc('bld', 'Buildings failed: ' + e.message); }
+}
+
+// ---------- wiring ----------------------------------------------------------
+function bindLayer(checkboxId, name, onFirstEnable) {
+  const cb = $(checkboxId);
+  cb.addEventListener('change', () => {
+    if (!map) return;
+    if (cb.checked) { layers[name].addTo(map); if (onFirstEnable) onFirstEnable(); }
+    else map.removeLayer(layers[name]);
+  });
+}
+
+function initMap() {
+  if (typeof L === 'undefined') {
+    $('map').innerHTML = '<div class="offline-note">Map unavailable: Leaflet/OSM tiles need ' +
+      'internet access. KPIs, dispatch simulation, and reports still work from public/synthetic data.</div>';
+    return;
+  }
+  map = L.map('map', { zoomControl: true }).setView([29.25, 47.95], 9);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors · prototype/light tile usage',
+  }).addTo(map);
+  for (const n of ['stations', 'lines', 'subs', 'buildings', 'demand', 'heat', 'assets'])
+    layers[n] = L.layerGroup();
+  layers.stations.addTo(map); layers.lines.addTo(map); layers.demand.addTo(map);
+  bindLayer('lyStations', 'stations'); bindLayer('lyLines', 'lines');
+  bindLayer('lySubs', 'subs', loadOsmPower);
+  bindLayer('lyBuildings', 'buildings', loadBuildings);
+  bindLayer('lyDemand', 'demand'); bindLayer('lyHeat', 'heat'); bindLayer('lyAssets', 'assets');
+  loadStations(); loadCorridors(); loadDemandLayer();
+}
+
+document.querySelectorAll('.tchip').forEach(ch => ch.addEventListener('click', () => {
+  document.querySelectorAll('.tchip').forEach(c => c.classList.remove('active'));
+  ch.classList.add('active');
+  offset = ch.dataset.off;
+  loadOverview(); loadDemandLayer();
+}));
+$('scenario').addEventListener('change', loadOverview);
+
+initMap();
+loadOverview();
+</script>
+</body>
+</html>

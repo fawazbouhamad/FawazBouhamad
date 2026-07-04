@@ -13,7 +13,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, HTMLResponse
 
-from . import map_layers, reports, risk_model
+from . import grid_model, grid_sources, map_layers, reports, risk_model
 from .assets import EXAMPLE_ASSETS, MALL_360
 from .data_sources import get_weather
 from .geo_sources import nearby_buildings
@@ -23,6 +23,8 @@ from .models import (
     ActionRequest,
     AssetRequest,
     CoolingEstimateResponse,
+    DispatchRequest,
+    DispatchResponse,
     FuelImpactRequest,
     FuelImpactResponse,
     HeatRiskResponse,
@@ -32,7 +34,7 @@ from .models import (
 from .outlook import build_weekly_outlook
 from .recommendations import build_action_plan
 
-API_VERSION = "0.3.0"
+API_VERSION = "0.4.0"
 DASHBOARD_FILE = Path(__file__).resolve().parent.parent / "dashboard" / "index.html"
 
 app = FastAPI(
@@ -76,6 +78,15 @@ def root() -> dict:
             "POST /grid/fuel-impact": "avoided MWh/fuel/CO2 for a peak reduction (screening)",
             "GET /report/{asset_slug}": "printable HTML heat-risk report for an asset",
             "GET /report/portfolio/kuwait": "printable HTML portfolio ranking of all example assets",
+            "GET /grid": "Grid-Aware Kuwait dashboard (map-first, public-data estimates)",
+            "GET /grid/assets": "all grid-relevant assets as GeoJSON",
+            "GET /grid/power-stations": "built-in Kuwait power stations (public profiles)",
+            "GET /grid/osm-power": "OSM power infrastructure (Overpass, with fallback skeleton)",
+            "GET /buildings/footprints": "OSM building footprints in bbox (with fallback)",
+            "GET /grid/demand-layer": "district-level estimated demand cells as GeoJSON",
+            "POST /grid/dispatch-simulate": "screening dispatch/fuel-burn simulation (not MEWRE)",
+            "GET /grid/overview": "climate->demand->stress->fuel KPIs for the grid dashboard",
+            "GET /grid/report/kuwait": "printable Grid-Aware Kuwait report",
             "GET /map/assets": "built-in example assets as GeoJSON",
             "GET /map/assets/{asset_slug}": "one example asset as GeoJSON",
             "GET /map/risk-layer": "risk-scored GeoJSON layer for all example assets",
@@ -276,6 +287,75 @@ def map_buildings_nearby(lat: float, lon: float, radius_m: int = 500) -> dict:
     result = nearby_buildings(lat, lon, radius_m, area, name)
     result["properties"]["nearest_example_asset"] = nearest_slug
     return result
+
+
+def _parse_hour_offset(value: str) -> int | str:
+    """'0'|'6'|'12'|'24'|'48' or 'peak7d' -> validated offset."""
+    if value == "peak7d":
+        return "peak7d"
+    try:
+        return max(0, min(int(value), 6 * 24))
+    except ValueError:
+        return 0
+
+
+@app.get("/grid/assets")
+def grid_assets() -> dict:
+    """All grid-relevant assets (stations, corridors, buildings, cells)."""
+    return grid_sources.grid_assets_fc(grid_model.demand_layer(0))
+
+
+@app.get("/grid/power-stations")
+def grid_power_stations() -> dict:
+    """Built-in Kuwait power stations as GeoJSON (public-data profiles)."""
+    return grid_sources.power_stations_fc()
+
+
+@app.get("/grid/osm-power")
+def grid_osm_power(bbox: str | None = None) -> dict:
+    """OSM power infrastructure via Overpass; fallback skeleton if offline.
+
+    bbox format: 'south,west,north,east' (defaults to Kuwait).
+    """
+    return grid_sources.osm_power_or_fallback(bbox)
+
+
+@app.get("/buildings/footprints")
+def buildings_footprints(bbox: str | None = None, limit: int = 200) -> dict:
+    """OSM building footprints in bbox, demand-classified; fallback offline."""
+    return grid_sources.buildings_or_fallback(bbox, limit)
+
+
+@app.get("/grid/demand-layer")
+def grid_demand_layer(hour_offset: str = "0") -> dict:
+    """District demand cells (estimated MW) at now/+6h/+12h/... or peak7d."""
+    return grid_model.demand_layer(_parse_hour_offset(hour_offset))
+
+
+@app.post("/grid/dispatch-simulate")
+def grid_dispatch_simulate(req: DispatchRequest) -> DispatchResponse:
+    """Screening dispatch/fuel-burn simulation. NOT actual MEWRE dispatch."""
+    return grid_model.dispatch_simulate(req)
+
+
+@app.get("/grid/overview")
+def grid_overview(hour_offset: str = "0",
+                  scenario: str = "generic_kuwait_grid") -> dict:
+    """Climate -> demand -> stress -> fuel KPI bundle for the dashboard."""
+    return grid_model.climate_grid_overview(_parse_hour_offset(hour_offset), scenario)
+
+
+@app.get("/grid/report/kuwait", response_class=HTMLResponse)
+def grid_report() -> HTMLResponse:
+    """Printable Grid-Aware Kuwait public-data report."""
+    return HTMLResponse(reports.grid_report_html())
+
+
+@app.get("/grid")
+def grid_dashboard() -> FileResponse:
+    return FileResponse(
+        DASHBOARD_FILE.parent / "grid.html", media_type="text/html"
+    )
 
 
 @app.get("/dashboard")
