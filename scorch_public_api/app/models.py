@@ -31,6 +31,13 @@ BuildingType = Literal[
     "mall", "tower", "school", "hospital", "mosque", "factory", "generic"
 ]
 OccupancyLevel = Literal["low", "medium", "high"]
+GeneratorType = Literal[
+    "combined_cycle_gas",
+    "simple_cycle_gas",
+    "diesel_backup",
+    "fuel_oil_steam",
+    "generic_grid",
+]
 
 
 class OperatingHours(BaseModel):
@@ -77,6 +84,8 @@ class AssetRequest(BaseModel):
 class WeatherPoint(BaseModel):
     time: str  # ISO timestamp, local time at the site
     temp_c: float
+    # Apparent ("feels like") temperature as a humidity proxy, when available.
+    apparent_temp_c: Optional[float] = None
 
 
 class WeatherSeries(BaseModel):
@@ -129,6 +138,51 @@ class CoolingEstimateResponse(BaseModel):
     peak_hour: str
     risk_category: str
     scorch_scenario: ScenarioSeries
+    confidence: str
+    assumptions: list[str]
+    data_that_would_improve_accuracy: list[str] = DATA_UPGRADES
+
+
+class DailyOutlook(BaseModel):
+    """One day of the 7-day heat/cooling outlook."""
+
+    date: str  # YYYY-MM-DD
+    max_temp_c: float
+    max_apparent_temp_c: Optional[float]  # humidity proxy, null if unavailable
+    cooling_degree_hours: float
+    heat_risk_score: float = Field(..., ge=0, le=100)
+    risk_category: str
+    peak_cooling_window: PeakWindow
+    recommended_action_summary: str
+
+
+class WeeklyOutlookResponse(BaseModel):
+    disclaimer: str = PUBLIC_DATA_DISCLAIMER
+    asset_slug: str
+    asset_name: str
+    weather_source: str
+    is_live: bool
+    days: list[DailyOutlook]
+    confidence: str
+    assumptions: list[str]
+    data_that_would_improve_accuracy: list[str] = DATA_UPGRADES
+
+
+class FuelImpactRequest(BaseModel):
+    """Input for /grid/fuel-impact: a peak reduction held for some hours."""
+
+    peak_reduction_mw: float = Field(..., ge=0, le=500)
+    duration_hours: float = Field(..., gt=0, le=24)
+    generator_type: GeneratorType = "generic_grid"
+
+
+class FuelImpactResponse(BaseModel):
+    disclaimer: str = PUBLIC_DATA_DISCLAIMER
+    generator_type: str
+    generator_label: str
+    avoided_mwh: float
+    estimated_fuel_avoided: dict[str, float]  # unit-keyed, e.g. natural_gas_gj
+    estimated_emissions_avoided: dict[str, float]  # e.g. co2_tonnes
     confidence: str
     assumptions: list[str]
     data_that_would_improve_accuracy: list[str] = DATA_UPGRADES

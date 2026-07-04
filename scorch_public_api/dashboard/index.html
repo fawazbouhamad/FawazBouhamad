@@ -35,6 +35,18 @@
            background: var(--hot); color: #1a0d05; font-weight: 700; font-size: 15px; cursor: pointer; }
   button:hover { filter: brightness(1.1); }
   button:disabled { opacity: 0.5; cursor: wait; }
+  button.secondary { background: transparent; border: 1px solid var(--hot); color: var(--hot);
+                     margin-top: 8px; font-weight: 600; }
+  a.linkbtn { display: block; text-align: center; margin-top: 8px; padding: 10px;
+              border: 1px solid var(--line); border-radius: 8px; color: var(--accent);
+              text-decoration: none; font-size: 13.5px; }
+  a.linkbtn:hover { border-color: var(--accent); }
+  .rightcol { display: grid; gap: 20px; align-content: start; }
+  table.wk { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  table.wk th, table.wk td { border: 1px solid var(--line); padding: 5px 8px; text-align: left; }
+  table.wk th { color: var(--muted); font-weight: 600; }
+  .chip { display: inline-block; padding: 0 8px; border-radius: 9px; color: #fff;
+          font-size: 11px; font-weight: 700; }
   .results { display: grid; gap: 20px; }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
   .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
@@ -87,7 +99,7 @@
   <div class="panel">
     <h3>Asset &amp; scenario</h3>
     <label>Example asset</label>
-    <select id="asset"><option value="360-mall">360 Mall, Kuwait (public assumptions)</option></select>
+    <select id="asset"><option value="360-mall">Loading assets…</option></select>
     <label>Building type</label>
     <select id="btype">
       <option value="mall" selected>Mall (mixed-use)</option>
@@ -109,15 +121,20 @@
     <label>Occupancy level</label>
     <select id="occ"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>
     <button id="run">Run SCORCH simulation</button>
+    <button id="runWeekly" class="secondary">Run 7-day outlook</button>
+    <a id="assetReportBtn" class="linkbtn" href="/report/360-mall" target="_blank">Open asset report ↗</a>
+    <a class="linkbtn" href="/report/portfolio/kuwait" target="_blank">Open Kuwait portfolio report ↗</a>
     <div id="status"></div>
   </div>
 
+  <div class="rightcol">
   <div class="results" id="results" style="display:none">
     <div class="tiles">
       <div class="tile"><div class="k">Heat risk score</div><div class="v" id="score">–</div><div class="s" id="category">–</div></div>
       <div class="tile"><div class="k">Peak cooling window</div><div class="v" id="window">–</div><div class="s">protect this window</div></div>
       <div class="tile"><div class="k">Estimated peak demand</div><div class="v" id="peak">–</div><div class="s" id="peakhour">–</div></div>
       <div class="tile"><div class="k">SCORCH peak reduction</div><div class="v" id="reduction">–</div><div class="s" id="energydelta">–</div></div>
+      <div class="tile"><div class="k">Grid impact (est.)</div><div class="v" id="gridImpact">–</div><div class="s" id="gridImpactSub">–</div></div>
     </div>
 
     <div class="panel"><h3>Outdoor temperature — next 48h (<span id="wsource">–</span>)</h3><canvas id="tempChart"></canvas></div>
@@ -137,6 +154,13 @@
       <ul id="upgrades"></ul>
     </div>
   </div>
+
+  <div class="panel" id="weeklyPanel" style="display:none">
+    <h3>7-day outlook — <span id="weeklyAsset"></span></h3>
+    <div id="weekly"></div>
+    <p id="weeklyNote" style="font-size:12px;color:var(--muted)"></p>
+  </div>
+  </div><!-- /rightcol -->
 </main>
 
 <script>
@@ -182,7 +206,7 @@ async function run() {
   btn.disabled = true; status.textContent = 'Fetching public weather and running the model…';
   try {
     const req = {
-      latitude: 29.2733, longitude: 47.9770,   // 360 Mall, Kuwait
+      latitude: currentAsset.lat, longitude: currentAsset.lon,
       building_type: document.getElementById('btype').value,
       area_m2: parseFloat(document.getElementById('area').value),
       operating_hours: { start_hour: parseInt(document.getElementById('open').value),
@@ -198,6 +222,7 @@ async function run() {
       event_day: req.event_day,
     });
     render(risk, cooling, plan);
+    renderGridImpact(risk, cooling);  // fire-and-forget estimate tile
     status.textContent = 'Done — weather source: ' + risk.weather.source;
   } catch (e) {
     status.textContent = 'Error: ' + e.message;
@@ -254,6 +279,89 @@ function render(risk, cooling, plan) {
 
 document.getElementById('run').addEventListener('click', run);
 
+// ---- asset selection, grid impact, 7-day outlook ------------------------
+let currentAsset = { slug: '360-mall', lat: 29.2733, lon: 47.977 };
+const RISK_CHIP_COLORS = { 'Low': '#2e7d32', 'Moderate': '#f9a825', 'High': '#ef6c00', 'Very High': '#c62828' };
+const chip = cat => '<span class="chip" style="background:' + (RISK_CHIP_COLORS[cat] || '#8d8d8d') + '">' + cat + '</span>';
+
+function useAsset(slug, focusMap) {
+  const p = assetIndex[slug];
+  if (!p) return;
+  currentAsset = { slug, lat: p.latitude, lon: p.longitude };
+  document.getElementById('asset').value = slug;
+  document.getElementById('btype').value = p.building_type;
+  document.getElementById('area').value = p.area_m2;
+  document.getElementById('open').value = p.operating_hours.start_hour;
+  document.getElementById('close').value = Math.min(p.operating_hours.end_hour, 24);
+  document.getElementById('assetReportBtn').href = '/report/' + slug;
+  if (focusMap && map) map.setView([p.latitude, p.longitude], 14);
+}
+
+async function loadAssetList() {
+  try {
+    const fc = await (await fetch('/map/assets')).json();
+    const sel = document.getElementById('asset');
+    sel.innerHTML = '';
+    for (const f of fc.features) {
+      const p = f.properties;
+      assetIndex[p.slug] = p;
+      const o = document.createElement('option');
+      o.value = p.slug;
+      o.textContent = p.name.replace(/ \(.*\)$/, '');  // short label
+      sel.appendChild(o);
+    }
+    sel.value = '360-mall';
+    useAsset('360-mall', false);
+    if (map) addAssetMarkers(assetsLayer, fc.features);
+  } catch (e) { mapStatus('Could not load assets: ' + e.message); }
+}
+document.getElementById('asset').addEventListener('change', e => useAsset(e.target.value, true));
+
+async function renderGridImpact(risk, cooling) {
+  try {
+    const w = risk.peak_cooling_window;
+    const duration = Math.max(w.end_hour - w.start_hour, 1);
+    const fi = await post('/grid/fuel-impact', {
+      peak_reduction_mw: Math.max(cooling.scorch_scenario.peak_reduction_mw, 0),
+      duration_hours: duration,
+      generator_type: 'generic_grid',
+    });
+    document.getElementById('gridImpact').textContent = fi.avoided_mwh.toFixed(1) + ' MWh';
+    document.getElementById('gridImpactSub').textContent =
+      '≈ ' + fi.estimated_emissions_avoided.co2_tonnes.toFixed(1) + ' t CO₂ avoided (' + duration + 'h, grid mix est.)';
+  } catch (e) {
+    document.getElementById('gridImpact').textContent = 'n/a';
+    document.getElementById('gridImpactSub').textContent = e.message;
+  }
+}
+
+async function runWeekly() {
+  const btn = document.getElementById('runWeekly'), el = document.getElementById('weekly');
+  document.getElementById('weeklyPanel').style.display = 'block';
+  document.getElementById('weeklyAsset').textContent =
+    (assetIndex[currentAsset.slug] || {}).name || currentAsset.slug;
+  el.innerHTML = 'Running 7-day outlook…';
+  btn.disabled = true;
+  try {
+    const w = await (await fetch('/demo/' + currentAsset.slug + '/weekly')).json();
+    el.innerHTML = '<table class="wk"><tr><th>Date</th><th>Max °C</th><th>Feels °C</th>' +
+      '<th>CDH</th><th>Risk</th><th>Peak window</th><th>Daily action</th></tr>' +
+      w.days.map(d =>
+        '<tr><td>' + d.date + '</td><td>' + d.max_temp_c.toFixed(1) + '</td><td>' +
+        (d.max_apparent_temp_c == null ? '–' : d.max_apparent_temp_c.toFixed(1)) + '</td><td>' +
+        d.cooling_degree_hours.toFixed(0) + '</td><td>' + d.heat_risk_score.toFixed(0) + ' ' +
+        chip(d.risk_category) + '</td><td>' +
+        String(d.peak_cooling_window.start_hour).padStart(2, '0') + ':00–' +
+        String(d.peak_cooling_window.end_hour).padStart(2, '0') + ':00</td><td>' +
+        d.recommended_action_summary + '</td></tr>').join('') + '</table>';
+    document.getElementById('weeklyNote').textContent =
+      'Source: ' + w.weather_source + (w.is_live ? ' (live)' : ' (offline fallback)') +
+      ' · ' + w.confidence + ' · ' + w.disclaimer;
+  } catch (e) { el.innerHTML = 'Outlook failed: ' + e.message; }
+  finally { btn.disabled = false; }
+}
+document.getElementById('runWeekly').addEventListener('click', runWeekly);
+
 // ---- Kuwait asset map (Leaflet + OSM tiles, free/open only) ------------
 // Public OSM tiles are for prototype/light usage; production should use
 // self-hosted tiles, PMTiles, or a usage-compliant provider.
@@ -285,7 +393,7 @@ function popupHtml(p) {
 function addAssetMarkers(layer, features) {
   for (const f of features) {
     const p = f.properties, [lon, lat] = f.geometry.coordinates;
-    assetIndex[p.slug] = { lat, lon, name: p.name };
+    assetIndex[p.slug] = p;  // full properties (coords, hours, risk if present)
     L.circleMarker([lat, lon], {
       radius: 9, color: '#12100e', weight: 1.5, fillOpacity: 0.9,
       fillColor: p.marker_color || '#8d8d8d',
@@ -311,7 +419,7 @@ async function loadFootprints(slug) {
   if (!map.hasLayer(footprintLayer)) footprintLayer.addTo(map);
   mapStatus('Fetching building footprints near ' + a.name + ' (OSM Overpass, optional)…');
   try {
-    const fc = await (await fetch('/map/buildings/nearby?lat=' + a.lat + '&lon=' + a.lon + '&radius_m=500')).json();
+    const fc = await (await fetch('/map/buildings/nearby?lat=' + a.latitude + '&lon=' + a.longitude + '&radius_m=500')).json();
     footprintLayer.clearLayers();
     const fallback = fc.properties.source === 'fallback_public_assumption';
     L.geoJSON(fc, {
@@ -323,7 +431,7 @@ async function loadFootprints(slug) {
         '<b>' + (f.properties.name || 'Building') + '</b><br>Source: ' + f.properties.source +
         (f.properties.disclaimer ? '<br><span style="font-size:11px;color:#666">' + f.properties.disclaimer + '</span>' : '')),
     }).addTo(footprintLayer);
-    map.setView([a.lat, a.lon], 15);
+    map.setView([a.latitude, a.longitude], 15);
     mapStatus(fallback
       ? 'Overpass unavailable — showing fallback public-assumption buffer (not a real footprint).'
       : 'OSM footprints loaded. © OpenStreetMap contributors (ODbL).');
@@ -331,16 +439,9 @@ async function loadFootprints(slug) {
 }
 
 async function useInSimulator(slug) {
-  try {
-    const f = await (await fetch('/map/assets/' + slug)).json();
-    const p = f.properties;
-    document.getElementById('btype').value = p.building_type;
-    document.getElementById('area').value = p.area_m2;
-    document.getElementById('open').value = p.operating_hours.start_hour;
-    document.getElementById('close').value = Math.min(p.operating_hours.end_hour, 24);
-    document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
-    await run();
-  } catch (e) { mapStatus('Could not load asset: ' + e.message); }
+  useAsset(slug, false);
+  document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
+  await run();
 }
 
 function initMap() {
@@ -367,11 +468,9 @@ function initMap() {
     if (e.layer === riskLayer && !riskLoaded) loadRiskLayer();
     if (e.layer === footprintLayer && footprintLayer.getLayers().length === 0) loadFootprints(selectedAsset);
   });
-  fetch('/map/assets').then(r => r.json())
-    .then(fc => addAssetMarkers(assetsLayer, fc.features))
-    .catch(e => mapStatus('Could not load assets: ' + e.message));
 }
 initMap();
+loadAssetList();  // fills the asset selector and (if the map is up) the markers
 </script>
 </body>
 </html>

@@ -97,9 +97,10 @@ def compute_heat_risk(req: AssetRequest, weather: WeatherSeries) -> dict:
     # Component 1: peak temperature severity (0-35). 35C -> 0, 50C -> 35.
     c_max = max(0.0, min(35.0, (max_temp - 35.0) / 15.0 * 35.0))
 
-    # Component 2: sustained heat via cooling degree hours (0-25).
-    # A brutal Kuwait 48h period reaches ~700-800 CDH.
-    c_cdh = max(0.0, min(25.0, cdh / 700.0 * 25.0))
+    # Component 2: sustained heat via cooling degree hours (0-25),
+    # normalised per hour so 24h and 48h series score consistently.
+    # A brutal Kuwait period averages ~14.6 cooling-degrees per hour.
+    c_cdh = max(0.0, min(25.0, cdh / (14.6 * max(len(temps), 1)) * 25.0))
 
     # Component 3: extreme-heat equipment stress hours (0-15).
     c_stress = min(15.0, hours_above_45 * 2.0)

@@ -108,11 +108,54 @@ curl "http://127.0.0.1:8000/demo/360-mall?event_day=true&occupancy_level=high"
 | `POST /cooling/estimate` | Hourly total/baseline/cooling MW, peak MW & hour, risk category, SCORCH scenario |
 | `POST /actions/recommend` | Pre-cooling window, peak protection, reductions, readiness checks, what NOT to do |
 | `GET /demo/360-mall` | Full pipeline for 360 Mall + plain-English executive summary |
+| `GET /demo/{slug}/weekly` | 7-day daily outlook: max/feels-like temp, CDH, risk, window, action |
+| `POST /grid/fuel-impact` | Avoided MWh, fuel, CO₂ for a peak reduction (5 generator archetypes) |
+| `GET /report/{slug}` | Printable HTML heat-risk report for one asset |
+| `GET /report/portfolio/kuwait` | Printable portfolio report ranking all example assets |
 | `GET /map/assets` | Built-in example assets as a GeoJSON FeatureCollection |
 | `GET /map/assets/{slug}` | One example asset as GeoJSON (404 if unknown) |
 | `GET /map/risk-layer` | Risk-scored GeoJSON layer (marker colors, peak windows, summaries) |
 | `GET /map/buildings/nearby?lat=&lon=&radius_m=` | OSM footprints via Overpass, with offline fallback geometry |
 | `GET /dashboard` | Interactive dashboard with Kuwait asset map (simulator works offline) |
+
+## Demo Pack v1
+
+Everything needed to demo SCORCH to a professor, investor, incubator, or facility manager —
+still 100% free public data, no keys, runs locally.
+
+**How to run:** same as Quick start (`uvicorn app.main:app --reload`), then open:
+
+| URL | What you'll see |
+|---|---|
+| `http://127.0.0.1:8000/dashboard` | Interactive dashboard: asset selector, map, simulation, 7-day outlook, grid impact |
+| `http://127.0.0.1:8000/report/360-mall` | Printable heat-risk report for 360 Mall (Ctrl/Cmd+P → PDF) |
+| `http://127.0.0.1:8000/report/portfolio/kuwait` | Kuwait portfolio report — all example assets ranked by risk |
+| `http://127.0.0.1:8000/demo/360-mall/weekly` | 7-day outlook JSON |
+| `http://127.0.0.1:8000/docs` | OpenAPI docs for the whole API |
+
+**Suggested screenshots for a pitch deck:**
+1. Dashboard with the risk layer enabled on the map (colored Kuwait asset markers).
+2. Dashboard after "Run SCORCH simulation" — risk tiles + baseline-vs-SCORCH chart.
+3. The 7-day outlook table (dashboard or asset report).
+4. The asset report header + risk cards (print preview looks clean).
+5. The portfolio report ranking table.
+
+**Grid/fuel impact** (`POST /grid/fuel-impact`): converts a peak reduction into avoided
+MWh, fuel, and CO₂ using typical heat rates and standard emission factors for five
+generator archetypes (combined-cycle gas, simple-cycle gas, diesel backup, fuel-oil
+steam, generic GCC grid mix). Order-of-magnitude only — it does **not** model actual
+Kuwait dispatch.
+
+**What the model CAN claim:** screening-grade heat-risk ranking, timing of the peak
+cooling window from a real public forecast, direction and rough size of pre-cooling
+benefits, order-of-magnitude fuel/CO₂ impact.
+**What it CANNOT claim:** verified kW/kWh savings, actual building loads, actual grid
+dispatch or prices, comfort outcomes in specific zones. Every response says so.
+
+**Why this matters for Kuwait/GCC:** cooling is most of summer peak demand; a screening
+tool that needs zero private data means a facility manager can see their risk profile
+*before* any integration work, and the upgrade path (bills → meters → BMS) is where the
+accuracy — and the business — grows.
 
 ## Map Layer Strategy
 
@@ -173,12 +216,16 @@ scorch_public_api/
 │   ├── recommendations.py  # rule-based action plans
 │   ├── assets.py           # archetypes + example Kuwait assets (360 Mall etc.)
 │   ├── geo_sources.py      # OSM Overpass footprints + offline fallback geometry
-│   └── map_layers.py       # GeoJSON builders + per-asset risk layer
+│   ├── map_layers.py       # GeoJSON builders + per-asset risk layer
+│   ├── outlook.py          # 7-day daily heat/cooling outlook
+│   ├── grid_impact.py      # avoided MWh/fuel/CO2 screening estimates
+│   └── reports.py          # printable HTML asset + portfolio reports
 ├── dashboard/
 │   └── index.html          # dashboard + Leaflet/OSM map (served at /dashboard)
 ├── tests/
 │   ├── test_risk_model.py
-│   └── test_map_layers.py
+│   ├── test_map_layers.py
+│   └── test_demo_pack.py
 └── examples/
     └── sample_360_mall_request.json
 ```

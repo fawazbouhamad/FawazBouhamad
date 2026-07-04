@@ -11,23 +11,28 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
-from . import map_layers, risk_model
+from . import map_layers, reports, risk_model
 from .assets import EXAMPLE_ASSETS, MALL_360
 from .data_sources import get_weather
 from .geo_sources import nearby_buildings
+from .grid_impact import compute_fuel_impact
 from .models import (
     ActionPlan,
     ActionRequest,
     AssetRequest,
     CoolingEstimateResponse,
+    FuelImpactRequest,
+    FuelImpactResponse,
     HeatRiskResponse,
     PUBLIC_DATA_DISCLAIMER,
+    WeeklyOutlookResponse,
 )
+from .outlook import build_weekly_outlook
 from .recommendations import build_action_plan
 
-API_VERSION = "0.2.0"
+API_VERSION = "0.3.0"
 DASHBOARD_FILE = Path(__file__).resolve().parent.parent / "dashboard" / "index.html"
 
 app = FastAPI(
@@ -67,6 +72,10 @@ def root() -> dict:
             "POST /cooling/estimate": "hourly demand + SCORCH scenario estimate",
             "POST /actions/recommend": "operational action plan for a risk score",
             "GET /demo/360-mall": "full demo run for 360 Mall",
+            "GET /demo/{asset_slug}/weekly": "7-day heat/cooling outlook for an example asset",
+            "POST /grid/fuel-impact": "avoided MWh/fuel/CO2 for a peak reduction (screening)",
+            "GET /report/{asset_slug}": "printable HTML heat-risk report for an asset",
+            "GET /report/portfolio/kuwait": "printable HTML portfolio ranking of all example assets",
             "GET /map/assets": "built-in example assets as GeoJSON",
             "GET /map/assets/{asset_slug}": "one example asset as GeoJSON",
             "GET /map/risk-layer": "risk-scored GeoJSON layer for all example assets",
@@ -198,6 +207,30 @@ def demo_360_mall(event_day: bool = False, occupancy_level: str = "medium") -> d
         "assumptions": risk_model.model_assumptions(req, weather),
         "executive_summary": summary,
     }
+
+
+@app.get("/demo/{asset_slug}/weekly")
+def weekly_outlook(asset_slug: str) -> WeeklyOutlookResponse:
+    """7-day daily heat/cooling outlook for a built-in example asset."""
+    return build_weekly_outlook(asset_slug)
+
+
+@app.post("/grid/fuel-impact")
+def grid_fuel_impact(req: FuelImpactRequest) -> FuelImpactResponse:
+    """Screening estimate of avoided MWh, fuel, and CO2 for a peak reduction."""
+    return compute_fuel_impact(req)
+
+
+@app.get("/report/portfolio/kuwait", response_class=HTMLResponse)
+def portfolio_report() -> HTMLResponse:
+    """Printable portfolio report ranking all built-in Kuwait example assets."""
+    return HTMLResponse(reports.portfolio_report_html())
+
+
+@app.get("/report/{asset_slug}", response_class=HTMLResponse)
+def asset_report(asset_slug: str) -> HTMLResponse:
+    """Printable heat-risk report for one built-in example asset."""
+    return HTMLResponse(reports.asset_report_html(asset_slug))
 
 
 @app.get("/map/assets")
