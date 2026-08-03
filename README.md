@@ -1,10 +1,31 @@
-## Hello there 👋 My name is Fawaz Bouhamad
+# Hello, I’m Fawaz Bouhamad 👋
 
+I am a graduate researcher in the **Climate Resilience Research Lab** within the **Department of Agricultural and Biological Engineering at the University of Florida**.
 
-**Fawaz Bouhamad** is currently a Postgraduate student at The Department of Mechanical, Aerospace, and Civil Engineering (MACE) in The University of Manchester. Fawaz is specialised in Hydrological Modelling and Programming from The University of Bristol. Fawaz is passionate about conducting impactful research projects that solve local and global problems related to sustainability and climate change. Fawaz has developed many projects using GIS technology, Python and MATLAB.
+My research sits at the intersection of **climate extremes, water resources, and geospatial analysis**, with particular interest in arid and semi-arid regions.
 
-These Projects include:
-- Modelling the groundwater recharge rates of the Raudhatain Watershed in Kuwait using SWAT
-- Programming the theoretical solution of a railway steel truss bridge using FEA
-- Conducting the statistical uncertainty analysis of an accelerometer in MATLAB
+## 🔬 Current Research
 
+* Compound and regionally extensive heatwaves
+* Spatiotemporal clustering and classification
+* Climate-risk and water-resources modeling
+* Remote sensing and climate reanalysis
+* Reproducible geospatial workflows
+* Climate resilience in the Eastern Mediterranean and Middle East
+
+I am currently developing **SCORCH — Spatiotemporal Classification of Regional Compound Heatwaves**, a reproducible Python and R framework for identifying, characterizing, and modeling large-scale heatwave events.
+
+## 🎓 Education
+
+* **M.S. in Agricultural and Biological Engineering** — University of Florida
+* **M.Sc. in Structural Engineering** — University of Manchester
+* **B.Eng. in Civil Engineering** — University of Bristol
+
+## 🌍 Research Interests
+
+Climate resilience • Extreme heat • GeoAI • Water security • Remote sensing • Spatial statistics • Arid-region sustainability
+
+## 🔗 Connect
+
+* [ORCID: 0009-0009-4138-6126](https://orcid.org/0009-0009-4138-6126)
+* [LinkedIn](https://www.linkedin.com/in/fawazbouhamad)
